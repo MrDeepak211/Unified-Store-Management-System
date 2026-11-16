@@ -88,8 +88,8 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
       await client.query(
         `INSERT INTO sales_orders
           (id, tenant_id, branch_id, channel, status, payment_status, order_number, customer_name, customer_phone,
-           subtotal, tax_total, grand_total, idempotency_key, reservation_expires_at, public_tracking_token_hash)
-         VALUES ($1, $2, $3, 'online', 'pending', 'pending', $4, $5, $6, 0, 0, 0, $7, now() + interval '15 minutes', $8)`,
+           subtotal, tax_total, grand_total, payment_method, idempotency_key, reservation_expires_at, public_tracking_token_hash)
+         VALUES ($1, $2, $3, 'online', 'pending', 'pending', $4, $5, $6, 0, 0, 0, 'online', $7, now() + interval '15 minutes', $8)`,
         [orderId, tenantId, branchId, orderNumber, body.customerName.trim(), body.customerPhone.trim(), key, trackingHash],
       );
 
