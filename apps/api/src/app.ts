@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { registerProductRoutes } from "./routes/products.js";
 import { registerOnboardingRoutes } from "./routes/onboarding.js";
 import { registerInventoryRoutes } from "./routes/inventory.js";
+import { registerOnlineOrderRoutes } from "./routes/onlineOrders.js";
 import { registerSaleRoutes } from "./routes/sales.js";
 import { registerStorefrontRoutes } from "./routes/storefront.js";
 
@@ -32,6 +33,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerInventoryRoutes(app);
   await registerSaleRoutes(app);
   await registerStorefrontRoutes(app);
+  await registerOnlineOrderRoutes(app);
 
   app.setErrorHandler((error, request, reply) => {
     request.log.error({ err: error }, "Unhandled request error");
