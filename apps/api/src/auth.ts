@@ -7,6 +7,7 @@ export interface TenantActor {
   membershipId: string;
   authSubject: string;
   role: "owner" | "admin" | "manager" | "cashier" | "viewer";
+  branchIds: string[];
 }
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
@@ -49,7 +50,7 @@ export async function requireTenantActor(
 
   const actor = await withTenantTransaction(tenantId, async (client) => {
     const result = await client.query(
-      `SELECT id, tenant_id, auth_subject, role
+      `SELECT id, tenant_id, auth_subject, role, branch_ids
        FROM tenant_memberships
        WHERE tenant_id = $1 AND auth_subject = $2 AND is_active = true
        LIMIT 1`,
@@ -61,6 +62,7 @@ export async function requireTenantActor(
       membershipId: row.id as string,
       authSubject: row.auth_subject as string,
       role: row.role as TenantActor["role"],
+      branchIds: (row.branch_ids ?? []) as string[],
     } : null;
   });
 
@@ -69,4 +71,10 @@ export async function requireTenantActor(
     throw Object.assign(new Error("Your role does not allow this action."), { statusCode: 403 });
   }
   return actor;
+}
+
+export function assertBranchAccess(actor: TenantActor, branchId: string) {
+  if (actor.branchIds.length > 0 && !actor.branchIds.includes(branchId)) {
+    throw Object.assign(new Error("Your staff account is not assigned to this branch."), { statusCode: 403 });
+  }
 }
