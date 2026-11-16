@@ -1,33 +1,32 @@
-# API conventions
+# USMS API conventions
 
-Base path: `/api/v1`.
+Base URL: `/api/v1`
 
-## Requests
+## Authentication and tenant selection
 
-- JSON request/response bodies.
-- Bearer access token for authenticated requests.
-- Resolve tenant context from authenticated membership, not an untrusted browser header alone.
-- Validate input and output with shared schemas.
-- Use cursor pagination for large collections.
-- Require `Idempotency-Key` on non-repeatable financial and sync commands.
-- Publish OpenAPI from route schemas.
+Business endpoints require `Authorization: Bearer <Supabase access token>` and `X-USMS-Tenant: <tenant UUID>`. The API verifies the JWT using the configured Supabase JWKS URL and issuer, then checks an active membership for the token subject and selected tenant. A tenant ID supplied by the browser is only a selector; it is never proof of authorization.
+
+Public storefront routes resolve a tenant by its unique shop slug and set transaction-local tenant scope before querying tenant-owned records.
+
+## Implemented routes
+
+- `POST /onboarding/shop` — authenticated first-shop creation.
+- `GET /me/shops` — list only the authenticated user's active shop memberships.
+- `GET /business/branches` — list branches for the selected tenant.
+- `GET /business/products` — product catalogue with summed available stock.
+- `POST /business/products` — create a product and its initial zero-stock branch balance.
+- `POST /business/inventory/adjustments` — append an audited stock adjustment.
+- `POST /pos/sales` — create a POS sale and atomically decrement available stock.
+- `GET /storefront/:slug` — public published catalogue and available stock.
+- `POST /storefront/:slug/orders` — create an online order and reserve stock.
+- `GET /storefront/:slug/orders/:orderId?token=...` — retrieve an order using its high-entropy tracking token.
+
+## Mutation requirements
+
+POS sale and stock adjustment endpoints require an `Idempotency-Key` header. The API serializes duplicate idempotency keys per tenant, validates all product and branch references inside the transaction, computes totals server-side, and rolls back the entire sale if any item cannot be fulfilled.
+
+Online checkout reserves stock for 15 minutes. Payment is not yet integrated; the reservation expiry worker releases stock for expired pending orders. The customer-facing tracking token is HMAC-derived using the server-only `ORDER_TRACKING_SECRET`; only its hash is stored.
 
 ## Error envelope
 
-```json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "The request could not be validated.",
-    "requestId": "req_..."
-  }
-}
-```
-
-Do not leak stack traces, SQL, secret values, or cross-tenant existence information.
-
-## Initial route groups
-
-`/auth`, `/tenants`, `/branches`, `/products`, `/categories`, `/inventory`, `/sales`, `/invoices`, `/returns`, `/payments`, `/customers`, `/suppliers`, `/purchases`, `/storefront`, `/carts`, `/orders`, `/pos/terminals`, `/sync`, `/integrations`, `/webhooks`, `/reports`.
-
-The server calculates authoritative totals, taxes, stock effects, payment status, and invoice numbers. Verify online payments server-to-server and accept only signed, replay-protected, idempotent webhooks.
+Errors use `{ "error": { "code": "...", "message": "...", "requestId": "..." } }`. Internal server errors do not expose SQL or stack details to clients.
