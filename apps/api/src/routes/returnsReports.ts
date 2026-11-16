@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { requireTenantActor } from "../auth.js";
+import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
 import { notifyInventoryChanged } from "./inventoryEvents.js";
 
@@ -26,11 +26,11 @@ export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
                   FILTER (WHERE i.id IS NOT NULL), '[]'::json) AS items
          FROM sales_orders o
          LEFT JOIN sales_order_items i ON i.tenant_id = o.tenant_id AND i.order_id = o.id
-         WHERE o.tenant_id = $1
+         WHERE o.tenant_id = $1 AND ($2::uuid[] IS NULL OR o.branch_id = ANY($2))
          GROUP BY o.id
          ORDER BY o.created_at DESC
          LIMIT 100`,
-        [actor.tenantId],
+        [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
       );
       return { sales: result.rows };
     });
@@ -59,6 +59,7 @@ export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
         [actor.tenantId, request.params.saleId],
       );
       if (!sale.rowCount) throw Object.assign(new Error("Sale not found or not eligible for return."), { statusCode: 404 });
+      assertBranchAccess(actor, sale.rows[0].branch_id);
       const restock = body.restock !== false;
       const returnId = randomUUID();
       const returnNumber = `RET-${randomUUID().slice(0, 8).toUpperCase()}`;
@@ -125,26 +126,26 @@ export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
       const [sales, stock, purchases, online] = await Promise.all([
         client.query(
           `SELECT COUNT(*)::int AS count, COALESCE(SUM(grand_total),0)::text AS revenue
-           FROM sales_orders WHERE tenant_id = $1 AND channel = 'pos' AND status IN ('confirmed','fulfilled')
+           FROM sales_orders WHERE tenant_id = $1 AND channel = 'pos' AND status IN ('confirmed','fulfilled') AND ($2::uuid[] IS NULL OR branch_id = ANY($2))
              AND created_at >= date_trunc('day', now())`,
-          [actor.tenantId],
+          [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
         ),
         client.query(
           `SELECT COALESCE(SUM(on_hand - reserved),0)::int AS available,
                   COUNT(*) FILTER (WHERE on_hand - reserved <= 5)::int AS low_stock
-           FROM inventory_balances WHERE tenant_id = $1`,
-          [actor.tenantId],
+           FROM inventory_balances WHERE tenant_id = $1 AND ($2::uuid[] IS NULL OR branch_id = ANY($2))`,
+          [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
         ),
         client.query(
           `SELECT COALESCE(SUM(grand_total),0)::text AS spend
-           FROM purchase_receipts WHERE tenant_id = $1 AND status = 'received'
+           FROM purchase_receipts WHERE tenant_id = $1 AND status = 'received' AND ($2::uuid[] IS NULL OR branch_id = ANY($2))
              AND created_at >= date_trunc('day', now())`,
-          [actor.tenantId],
+          [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
         ),
         client.query(
           `SELECT COUNT(*)::int AS pending
-           FROM sales_orders WHERE tenant_id = $1 AND channel = 'online' AND status = 'pending'`,
-          [actor.tenantId],
+           FROM sales_orders WHERE tenant_id = $1 AND channel = 'online' AND status = 'pending' AND ($2::uuid[] IS NULL OR branch_id = ANY($2))`,
+          [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
         ),
       ]);
       return {
