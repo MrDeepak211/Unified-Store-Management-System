@@ -15,7 +15,9 @@ type Overview = { today: { posSalesCount: number; posRevenue: string; purchaseSp
 type StoreSettings = { displayName: string; primaryColor: string; supportEmail?: string | null; supportPhone?: string | null; isPublished: boolean };
 type GatewaySettings = { keyId: string; mode: "test" | "live"; isEnabled: boolean };
 type BusinessProfile = { shopName: string; legalName: string; gstin?: string | null; stateCode?: string | null; address?: Record<string, unknown>; timezone: string };
-type Invoice = { orderId: string; invoiceNumber: string; grandTotal: string; subtotal?: string; taxTotal?: string; channel: string; status: string; issuedAt: string; issuer?: Record<string, unknown>; customer?: Record<string, unknown> };\ntype InvoiceLine = { productName: string; sku?: string | null; hsnCode?: string | null; unitOfMeasure: string; quantity: number; unitPrice: string; taxRate: string; lineTotal: string };\ntype InvoiceDetail = { invoice: Invoice; items: InvoiceLine[]; documentType: string; gstReviewRequired: boolean };
+type Invoice = { orderId: string; invoiceNumber: string; grandTotal: string; subtotal?: string; taxTotal?: string; channel: string; status: string; issuedAt: string; issuer?: Record<string, unknown>; customer?: Record<string, unknown> };
+type InvoiceLine = { productName: string; sku?: string | null; hsnCode?: string | null; unitOfMeasure: string; quantity: number; unitPrice: string; taxRate: string; lineTotal: string };
+type InvoiceDetail = { invoice: Invoice; items: InvoiceLine[]; documentType: string; gstReviewRequired: boolean };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -80,7 +82,9 @@ export default function App() {
   const [legalName, setLegalName] = useState("");
   const [gstin, setGstin] = useState("");
   const [stateCode, setStateCode] = useState("27");
-  const [invoices, setInvoices] = useState<Invoice[]>([]);\n  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetail | null>(null);\n  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetail | null>(null);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
 
   useEffect(() => {
     if (!supabase) { setAuthReady(true); return; }
@@ -262,7 +266,8 @@ export default function App() {
     } catch (e) { setError(e instanceof Error ? e.message : "Could not open invoice."); }
     finally { setInvoiceLoading(false); }
   }
-\n  async function saveBusinessProfile(event: FormEvent) {
+
+  async function saveBusinessProfile(event: FormEvent) {
     event.preventDefault(); setError(""); setMessage("");
     try {
       const data = await api<{ profile: BusinessProfile }>("/api/v1/business/profile", {
