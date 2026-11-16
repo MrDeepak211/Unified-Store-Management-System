@@ -26,6 +26,22 @@ function formatMoney(value: bigint): string {
 }
 
 export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
+  app.get("/api/v1/business/purchases/receipts", async (request) => {
+    const actor = await requireTenantActor(request);
+    return withTenantTransaction(actor.tenantId, async (client) => {
+      const result = await client.query(
+        `SELECT r.id, r.receipt_number AS "receiptNumber", r.status, r.grand_total::text AS "grandTotal",
+                r.created_at AS "createdAt", s.name AS "supplierName"
+         FROM purchase_receipts r
+         LEFT JOIN suppliers s ON s.tenant_id = r.tenant_id AND s.id = r.supplier_id
+         WHERE r.tenant_id = $1
+         ORDER BY r.created_at DESC LIMIT 100`,
+        [actor.tenantId],
+      );
+      return { receipts: result.rows };
+    });
+  });
+
   app.get("/api/v1/business/customers", async (request) => {
     const actor = await requireTenantActor(request);
     return withTenantTransaction(actor.tenantId, async (client) => {
