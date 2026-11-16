@@ -148,9 +148,13 @@ export default function App() {
     if (!session || !selectedTenant) return;
     setLoading(true);
     try {
-      const [branchData, productData, customerData, supplierData, receiptData, salesData, reportData, storeData, gatewayData, profileData, invoiceData, categoryData] = await Promise.all([
-        api<{ branches: Branch[] }>("/api/v1/business/branches", {}, selectedTenant),
-        api<{ products: Product[] }>("/api/v1/business/products", {}, selectedTenant),
+      const branchData = await api<{ branches: Branch[] }>("/api/v1/business/branches", {}, selectedTenant);
+      setBranches(branchData.branches);
+      const chosenBranch = branchData.branches.find((branch) => branch.id === branchId) ?? branchData.branches.find((branch) => branch.isDefault) ?? branchData.branches[0];
+      const activeBranchId = chosenBranch?.id ?? "";
+      if (activeBranchId && activeBranchId !== branchId) setBranchId(activeBranchId);
+      const [productData, customerData, supplierData, receiptData, salesData, reportData, storeData, gatewayData, profileData, invoiceData, categoryData] = await Promise.all([
+        api<{ products: Product[] }>(`/api/v1/business/products?branchId=${encodeURIComponent(activeBranchId)}`, {}, selectedTenant),
         api<{ customers: Party[] }>("/api/v1/business/customers", {}, selectedTenant),
         api<{ suppliers: Party[] }>("/api/v1/business/suppliers", {}, selectedTenant),
         api<{ receipts: Receipt[] }>("/api/v1/business/purchases/receipts", {}, selectedTenant),
