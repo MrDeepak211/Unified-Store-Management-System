@@ -50,7 +50,7 @@ For local-only use, the Docker Compose PostgreSQL password is deliberately simpl
 | POST | `/api/v1/business/inventory/adjustments` | Audited stock adjustment |
 | POST | `/api/v1/pos/sales` | Transactional POS sale with stock deduction |
 | GET | `/api/v1/storefront/:slug` | Published shop catalogue and available stock |
-| POST | `/api/v1/storefront/:slug/orders` | Reserve online order stock for 15 minutes |
+| POST | `/api/v1/storefront/:slug/orders` | Reserve online order stock for 15 minutes |\n| POST | `/api/v1/storefront/:slug/orders/:orderId/payment` | Create the shop's Razorpay payment order |\n| POST | `/api/v1/storefront/:slug/orders/:orderId/verify-payment` | Verify payment and commit reserved stock |\n| POST | `/api/v1/webhooks/razorpay/:slug` | Verify signed Razorpay webhook events |
 | GET | `/api/v1/storefront/:slug/orders/:orderId` | Private token-based order status |
 
 Authenticated business endpoints require a Supabase access token and an `X-USMS-Tenant` header. POS sale and stock adjustment mutations require an `Idempotency-Key` header.
@@ -70,4 +70,4 @@ Implemented foundation: database migrations for tenants, branches, products, bal
 
 **Not yet production complete:** payment gateway and merchant settlement, online payment confirmation webhook, GST-compliant final invoices/credit notes, purchase receiving and supplier management, returns/refunds, staff invitations and branch permissions, full offline POS reconciliation, subscriptions, super-admin workflows, image uploads, email/SMS notifications, observability, backups and restore drills.
 
-The storefront currently reserves stock but does not collect payment. Do not use this scaffold for live financial or customer data until the remaining flows, tenant isolation and payment security have been tested. GST workflows require review by a qualified Indian tax professional. Production database runtime credentials must use a non-owner, non-superuser role without BYPASSRLS.
+The storefront supports per-shop Razorpay Standard Checkout, server-side payment verification and signed webhook handling. Payment accounts must be configured by each shop owner and approved by Razorpay. Do not use this scaffold for live financial or customer data until the remaining flows, tenant isolation and payment security have been tested. GST workflows require review by a qualified Indian tax professional. Production database runtime credentials must use a non-owner, non-superuser role without BYPASSRLS.
