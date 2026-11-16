@@ -35,8 +35,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     try { done(null, JSON.parse(rawBody.toString("utf8"))); }
     catch (error) { done(error as Error); }
   });
+  const allowedOrigins = (process.env.WEB_ORIGIN ?? "").split(",").map((value) => value.trim()).filter(Boolean);
   await app.register(cors, {
-    origin: process.env.WEB_ORIGIN?.split(",").map((value) => value.trim()) ?? false,
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const tenantStoreOrigin = /^https:\/\/[a-z0-9-]+\.usms\.in$/i.test(origin);
+      callback(null, allowedOrigins.includes(origin) || tenantStoreOrigin);
+    },
     credentials: true,
   });
 
@@ -45,7 +50,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     name: "Unified Store Management System",
     version: "0.1.0",
     apiVersion: "v1",
-    capabilities: ["individual-storefronts", "shared-inventory", "pos-sales"],
+    capabilities: ["individual-storefronts", "shared-inventory", "pos-sales", "branch-transfers", "staff-access", "online-payments", "sales-invoices"],
   }));
 
   await registerMeRoutes(app);
