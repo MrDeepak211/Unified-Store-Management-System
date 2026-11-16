@@ -6,7 +6,7 @@ import { listPendingSales } from "./offlineQueue";
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 type Shop = { tenantId: string; shopName: string; slug: string; role: string };
 type Branch = { id: string; name: string; code: string; isDefault: boolean };
-type Product = { id: string; sku: string; name: string; price: string; taxRate: string; availableStock: number; description?: string; hsnCode?: string | null; unitOfMeasure?: string };
+type Product = { id: string; sku: string; name: string; price: string; taxRate: string; availableStock: number; description?: string; hsnCode?: string | null; unitOfMeasure?: string; barcode?: string | null; categoryId?: string | null; categoryName?: string | null };
 type CartLine = { productId: string; quantity: number };
 type Party = { id: string; name: string; phone?: string | null };
 type Receipt = { id: string; receiptNumber: string; supplierName?: string | null; grandTotal: string; createdAt: string };
@@ -43,6 +43,11 @@ export default function App() {
   const [newTax, setNewTax] = useState("0");
   const [newHsn, setNewHsn] = useState("");
   const [newUnit, setNewUnit] = useState("PCS");
+  const [newBarcode, setNewBarcode] = useState("");
+  const [newCategoryId, setNewCategoryId] = useState("");
+  const [categories, setCategories] = useState<Array<{id:string;name:string}>>([]);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [barcodeSearch, setBarcodeSearch] = useState("");
   const [stockProductId, setStockProductId] = useState("");
   const [stockDelta, setStockDelta] = useState("10");
   const [customers, setCustomers] = useState<Party[]>([]);
@@ -115,7 +120,7 @@ export default function App() {
     if (!session || !selectedTenant) return;
     setLoading(true);
     try {
-      const [branchData, productData, customerData, supplierData, receiptData, salesData, reportData, storeData, gatewayData, profileData, invoiceData] = await Promise.all([
+      const [branchData, productData, customerData, supplierData, receiptData, salesData, reportData, storeData, gatewayData, profileData, invoiceData, categoryData] = await Promise.all([
         api<{ branches: Branch[] }>("/api/v1/business/branches", {}, selectedTenant),
         api<{ products: Product[] }>("/api/v1/business/products", {}, selectedTenant),
         api<{ customers: Party[] }>("/api/v1/business/customers", {}, selectedTenant),
@@ -127,6 +132,7 @@ export default function App() {
         api<{ razorpay: GatewaySettings | null }>("/api/v1/business/payments/razorpay", {}, selectedTenant),
         api<{ profile: BusinessProfile }>("/api/v1/business/profile", {}, selectedTenant),
         api<{ invoices: Invoice[] }>("/api/v1/business/invoices", {}, selectedTenant),
+        api<{ categories: Array<{id:string;name:string}> }>("/api/v1/business/categories", {}, selectedTenant),
       ]);
       setBranches(branchData.branches);
       const chosenBranch = branchData.branches.find((branch) => branch.isDefault) ?? branchData.branches[0];
@@ -151,6 +157,7 @@ export default function App() {
       setGstin(profileData.profile?.gstin ?? "");
       setStateCode(profileData.profile?.stateCode ?? "27");
       setInvoices(invoiceData.invoices);
+      setCategories(categoryData.categories);
       setPurchaseProductId((current) => current || productData.products[0]?.id || "");
       setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load shop data."); }
@@ -223,8 +230,8 @@ export default function App() {
   async function addProduct(event: FormEvent) {
     event.preventDefault(); setError(""); setMessage("");
     try {
-      await api("/api/v1/business/products", { method: "POST", body: JSON.stringify({ branchId, sku: newSku, name: newName, price: newPrice, taxRate: newTax, hsnCode: newHsn, unitOfMeasure: newUnit }) }, tenantId);
-      setNewSku(""); setNewName(""); setNewPrice(""); setNewTax("0"); setNewHsn(""); setNewUnit("PCS");
+      await api("/api/v1/business/products", { method: "POST", body: JSON.stringify({ branchId, sku: newSku, name: newName, price: newPrice, taxRate: newTax, hsnCode: newHsn, unitOfMeasure: newUnit, barcode: newBarcode, categoryId: newCategoryId || undefined }) }, tenantId);
+      setNewSku(""); setNewName(""); setNewPrice(""); setNewTax("0"); setNewHsn(""); setNewUnit("PCS"); setNewBarcode(""); setNewCategoryId("");
       await loadBusinessData();
       setMessage("Product added. Now set its opening stock.");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not add product."); }
@@ -303,6 +310,24 @@ export default function App() {
       setStoreSettings(data.settings);
       setMessage(data.settings.isPublished ? "Your online store is now published." : "Your online store has been unpublished.");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not change store publishing status."); }
+  }
+
+
+  async function addCategory(event: FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    try {
+      const data = await api<{ category: { id: string; name: string } }>("/api/v1/business/categories", { method: "POST", body: JSON.stringify({ name: newCategoryName }) }, tenantId);
+      setCategories((current) => [...current, data.category]);
+      setNewCategoryId(data.category.id); setNewCategoryName(""); setMessage("Product category created.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not create category."); }
+  }
+  function scanProduct(event: FormEvent) {
+    event.preventDefault();
+    const term = barcodeSearch.trim().toLowerCase();
+    const found = products.find((product) => product.barcode?.toLowerCase() === term || product.sku.toLowerCase() === term);
+    if (!found) { setError("No product matched that barcode or SKU."); return; }
+    if (found.availableStock < 1) { setError("This product is out of stock."); return; }
+    addToCart(found); setBarcodeSearch(""); setError("");
   }
 
   async function addCustomer(event: FormEvent) {
@@ -384,10 +409,10 @@ export default function App() {
       <section id="overview" className="welcome-row"><div><p className="eyebrow">YOUR BUSINESS, AT A GLANCE</p><h1>Good evening.</h1><p>Everything your physical and online store needs, in one place.</p></div><div className="branch-chip">⌖ {branches.find((b) => b.id === branchId)?.name ?? "Loading branch"}</div></section>
       <section className="metric-grid"><article><span>PRODUCTS</span><strong>{products.length}</strong><small>In your catalogue</small></article><article><span>AVAILABLE STOCK</span><strong>{products.reduce((sum,p) => sum + p.availableStock,0)}</strong><small>Across this shop</small></article><article><span>LOW STOCK</span><strong>{products.filter((p) => p.availableStock > 0 && p.availableStock <= 5).length}</strong><small>5 units or fewer</small></article><article><span>OFFLINE QUEUE</span><strong>{pendingCount ?? "—"}</strong><small>Pending local sales</small></article></section>
       <section className="management-grid" id="products"><div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">CATALOGUE</span><h3>Products & inventory</h3></div><span className="muted">{products.length} ITEMS</span></div>{loading ? <p>Loading products…</p> : <div className="product-table"><div className="table-head"><span>PRODUCT</span><span>PRICE</span><span>AVAILABLE</span></div>{products.map((product) => <div className="table-row" key={product.id}><div><b>{product.name}</b><small>{product.sku}</small></div><span>₹{Number(product.price).toFixed(2)}</span><strong className={product.availableStock <= 5 ? "low-stock" : ""}>{product.availableStock}</strong></div>)}</div>}
-        <form className="inline-form" onSubmit={addProduct}><h4>Add a product</h4><div className="form-grid"><input value={newSku} onChange={(e)=>setNewSku(e.target.value)} required placeholder="SKU / barcode"/><input value={newName} onChange={(e)=>setNewName(e.target.value)} required placeholder="Product name"/><input value={newPrice} onChange={(e)=>setNewPrice(e.target.value)} required type="number" min="0" step="0.01" placeholder="Price ₹"/><input value={newTax} onChange={(e)=>setNewTax(e.target.value)} type="number" min="0" max="100" step="0.01" placeholder="Tax %"/><input value={newHsn} onChange={(e)=>setNewHsn(e.target.value)} placeholder="HSN code (optional)"/><input value={newUnit} onChange={(e)=>setNewUnit(e.target.value)} placeholder="Unit (PCS, KG, LTR)"/></div><button className="secondary-button" disabled={!branchId}>Save product</button></form>
+        <form className="inline-form" onSubmit={addProduct}><h4>Add a product</h4><div className="form-grid"><input value={newSku} onChange={(e)=>setNewSku(e.target.value)} required placeholder="SKU / barcode"/><input value={newName} onChange={(e)=>setNewName(e.target.value)} required placeholder="Product name"/><input value={newPrice} onChange={(e)=>setNewPrice(e.target.value)} required type="number" min="0" step="0.01" placeholder="Price ₹"/><input value={newTax} onChange={(e)=>setNewTax(e.target.value)} type="number" min="0" max="100" step="0.01" placeholder="Tax %"/><input value={newHsn} onChange={(e)=>setNewHsn(e.target.value)} placeholder="HSN code (optional)"/><input value={newUnit} onChange={(e)=>setNewUnit(e.target.value)} placeholder="Unit (PCS, KG, LTR)"/><input value={newBarcode} onChange={(e)=>setNewBarcode(e.target.value)} placeholder="Barcode (optional)"/><select value={newCategoryId} onChange={(e)=>setNewCategoryId(e.target.value)}><option value="">No category</option>{categories.map((cat)=><option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></div><button className="secondary-button" disabled={!branchId}>Save product</button></form><form className="inline-form" onSubmit={addCategory}><h4>Create category</h4><div className="form-grid"><input value={newCategoryName} onChange={(e)=>setNewCategoryName(e.target.value)} required placeholder="Category name"/></div><button className="secondary-button">Add category</button></form>
         <form className="inline-form stock-form" onSubmit={adjustStock}><h4>Receive / adjust stock</h4><div className="form-grid"><select value={stockProductId} onChange={(e)=>setStockProductId(e.target.value)} required><option value="">Select product</option>{products.map((p)=><option key={p.id} value={p.id}>{p.name} · {p.availableStock} available</option>)}</select><input type="number" step="1" value={stockDelta} onChange={(e)=>setStockDelta(e.target.value)} required placeholder="Quantity change (+/-)"/></div><button className="secondary-button" disabled={!stockProductId}>Update stock</button></form>
       </div>
-      <div className="panel-card pos-card" id="billing"><div className="panel-heading"><div><span className="eyebrow">COUNTER BILLING</span><h3>Quick sale</h3></div><span className="live-label">● LIVE STOCK</span></div><div className="pos-products">{products.filter((p)=>p.availableStock>0).slice(0,8).map((product)=><button key={product.id} className="pos-product" onClick={()=>addToCart(product)}><span>{product.name}</span><b>₹{Number(product.price).toFixed(2)}</b><small>{product.availableStock} available · Add +</small></button>)}</div><div className="sale-summary"><h4>Current bill <span>{cart.reduce((n,l)=>n+l.quantity,0)} items</span></h4>{cart.map((line)=>{const product=products.find((p)=>p.id===line.productId);return <div className="bill-line" key={line.productId}><span>{product?.name} × {line.quantity}</span><b>₹{((Number(product?.price??0)*line.quantity)*(1+Number(product?.taxRate??0)/100)).toFixed(2)}</b><button onClick={()=>setCart((current)=>current.filter((x)=>x.productId!==line.productId))}>×</button></div>})}<div className="bill-total"><span>Estimated total</span><strong>₹{cartTotal.toFixed(2)}</strong></div><button className="primary-button" disabled={!cart.length || loading} onClick={()=>void completeSale()}>Complete sale · ₹{cartTotal.toFixed(2)} ↗</button><small>Server verifies final prices and available stock before billing.</small></div></div></section>
+      <div className="panel-card pos-card" id="billing"><div className="panel-heading"><div><span className="eyebrow">COUNTER BILLING</span><h3>Quick sale</h3></div><span className="live-label">● LIVE STOCK</span></div><form className="barcode-search" onSubmit={scanProduct}><input autoFocus value={barcodeSearch} onChange={(e)=>setBarcodeSearch(e.target.value)} placeholder="Scan barcode or enter SKU, then press Enter"/><button>Find / add</button></form><div className="pos-products">{products.filter((p)=>p.availableStock>0).slice(0,8).map((product)=><button key={product.id} className="pos-product" onClick={()=>addToCart(product)}><span>{product.name}</span><b>₹{Number(product.price).toFixed(2)}</b><small>{product.availableStock} available · Add +</small></button>)}</div><div className="sale-summary"><h4>Current bill <span>{cart.reduce((n,l)=>n+l.quantity,0)} items</span></h4>{cart.map((line)=>{const product=products.find((p)=>p.id===line.productId);return <div className="bill-line" key={line.productId}><span>{product?.name} × {line.quantity}</span><b>₹{((Number(product?.price??0)*line.quantity)*(1+Number(product?.taxRate??0)/100)).toFixed(2)}</b><button onClick={()=>setCart((current)=>current.filter((x)=>x.productId!==line.productId))}>×</button></div>})}<div className="bill-total"><span>Estimated total</span><strong>₹{cartTotal.toFixed(2)}</strong></div><button className="primary-button" disabled={!cart.length || loading} onClick={()=>void completeSale()}>Complete sale · ₹{cartTotal.toFixed(2)} ↗</button><small>Server verifies final prices and available stock before billing.</small></div></div></section>
 
       <section className="support-grid">
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">RELATIONSHIPS</span><h3>Customers & suppliers</h3></div></div>
