@@ -1,6 +1,6 @@
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { registerProductRoutes } from "./routes/products.js";
 import { registerOnboardingRoutes } from "./routes/onboarding.js";
 import { registerInventoryRoutes } from "./routes/inventory.js";
@@ -12,6 +12,7 @@ import { registerPartyAndPurchaseRoutes } from "./routes/partiesPurchases.js";
 import { registerReturnsAndReportsRoutes } from "./routes/returnsReports.js";
 import { registerStoreSettingsRoutes } from "./routes/storeSettings.js";
 import { registerPaymentRoutes } from "./routes/payments.js";
+import { registerRazorpayWebhookRoutes } from "./routes/razorpayWebhook.js";
 import { registerSaleRoutes } from "./routes/sales.js";
 import { registerStorefrontRoutes } from "./routes/storefront.js";
 
@@ -22,6 +23,12 @@ export async function buildApp(): Promise<FastifyInstance> {
     bodyLimit: 1_048_576,
   });
   await app.register(helmet);
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser("application/json", { parseAs: "buffer" }, (request, body, done) => {
+    (request as FastifyRequest & { rawBody?: Buffer }).rawBody = body;
+    try { done(null, JSON.parse(body.toString("utf8"))); }
+    catch (error) { done(error as Error); }
+  });
   await app.register(cors, {
     origin: process.env.WEB_ORIGIN?.split(",").map((value) => value.trim()) ?? false,
     credentials: true,
@@ -44,6 +51,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerReturnsAndReportsRoutes(app);
   await registerStoreSettingsRoutes(app);
   await registerPaymentRoutes(app);
+  await registerRazorpayWebhookRoutes(app);
   await registerSaleRoutes(app);
   await registerStorefrontRoutes(app);
   await registerInventoryEventRoutes(app);
