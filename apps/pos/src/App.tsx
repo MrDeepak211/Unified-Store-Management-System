@@ -12,6 +12,7 @@ type Party = { id: string; name: string; phone?: string | null };
 type Receipt = { id: string; receiptNumber: string; supplierName?: string | null; grandTotal: string; createdAt: string };
 type Sale = { id: string; orderNumber: string; status: string; channel: string; grandTotal: string; items: Array<{ productId: string; quantity: number }> };
 type Overview = { today: { posSalesCount: number; posRevenue: string; purchaseSpend: string }; inventory: { available: number; low_stock: number }; online: { pendingOrders: number } };
+type StoreSettings = { displayName: string; primaryColor: string; supportEmail?: string | null; supportPhone?: string | null; isPublished: boolean };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -55,6 +56,11 @@ export default function App() {
   const [returnSaleId, setReturnSaleId] = useState("");
   const [returnProductId, setReturnProductId] = useState("");
   const [returnQuantity, setReturnQuantity] = useState("1");
+  const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
+  const [storeDisplayName, setStoreDisplayName] = useState("");
+  const [storeColor, setStoreColor] = useState("#2563eb");
+  const [storeSupportPhone, setStoreSupportPhone] = useState("");
+  const [storeSupportEmail, setStoreSupportEmail] = useState("");
 
   useEffect(() => {
     if (!supabase) { setAuthReady(true); return; }
@@ -94,7 +100,7 @@ export default function App() {
     if (!session || !selectedTenant) return;
     setLoading(true);
     try {
-      const [branchData, productData, customerData, supplierData, receiptData, salesData, reportData] = await Promise.all([
+      const [branchData, productData, customerData, supplierData, receiptData, salesData, reportData, storeData] = await Promise.all([
         api<{ branches: Branch[] }>("/api/v1/business/branches", {}, selectedTenant),
         api<{ products: Product[] }>("/api/v1/business/products", {}, selectedTenant),
         api<{ customers: Party[] }>("/api/v1/business/customers", {}, selectedTenant),
@@ -102,6 +108,7 @@ export default function App() {
         api<{ receipts: Receipt[] }>("/api/v1/business/purchases/receipts", {}, selectedTenant),
         api<{ sales: Sale[] }>("/api/v1/business/sales", {}, selectedTenant),
         api<Overview>("/api/v1/business/reports/overview", {}, selectedTenant),
+        api<{ settings: StoreSettings }>("/api/v1/business/storefront", {}, selectedTenant),
       ]);
       setBranches(branchData.branches);
       const chosenBranch = branchData.branches.find((branch) => branch.isDefault) ?? branchData.branches[0];
@@ -113,6 +120,11 @@ export default function App() {
       setReceipts(receiptData.receipts);
       setSales(salesData.sales);
       setOverview(reportData);
+      setStoreSettings(storeData.settings);
+      setStoreDisplayName(storeData.settings?.displayName ?? "");
+      setStoreColor(storeData.settings?.primaryColor ?? "#2563eb");
+      setStoreSupportPhone(storeData.settings?.supportPhone ?? "");
+      setStoreSupportEmail(storeData.settings?.supportEmail ?? "");
       setPurchaseProductId((current) => current || productData.products[0]?.id || "");
       setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load shop data."); }
@@ -145,7 +157,9 @@ export default function App() {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const frames = buffer.split("\n\n");
+          const frames = buffer.split("
+
+");
           buffer = frames.pop() ?? "";
           if (frames.some((frame) => frame.startsWith("data: "))) void loadBusinessData(tenantId);
         }
@@ -204,6 +218,19 @@ export default function App() {
     } catch (e) { setError(e instanceof Error ? e.message : "Stock update failed."); }
   }
 
+
+
+  async function saveStorefront(event: FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    try {
+      const data = await api<{ settings: StoreSettings }>("/api/v1/business/storefront", {
+        method: "PUT",
+        body: JSON.stringify({ displayName: storeDisplayName, primaryColor: storeColor, supportPhone: storeSupportPhone, supportEmail: storeSupportEmail, isPublished: !storeSettings?.isPublished }),
+      }, tenantId);
+      setStoreSettings(data.settings);
+      setMessage(data.settings.isPublished ? "Your online store is now published." : "Your online store has been unpublished.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not update your online store."); }
+  }
 
   async function addCustomer(event: FormEvent) {
     event.preventDefault(); setError(""); setMessage("");
@@ -302,6 +329,11 @@ export default function App() {
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">RETURNS</span><h3>Process a product return</h3></div></div>
           <form className="inline-form" onSubmit={processReturn}><select value={returnSaleId} onChange={(e)=>{setReturnSaleId(e.target.value);setReturnProductId("");}} required><option value="">Select completed sale</option>{sales.filter((s)=>["confirmed","fulfilled"].includes(s.status)).map((s)=><option key={s.id} value={s.id}>{s.orderNumber} · ₹{Number(s.grandTotal).toFixed(2)}</option>)}</select><select value={returnProductId} onChange={(e)=>setReturnProductId(e.target.value)} required><option value="">Select returned product</option>{sales.find((s)=>s.id===returnSaleId)?.items.map((item)=><option key={item.productId} value={item.productId}>{products.find((p)=>p.id===item.productId)?.name ?? item.productId} · sold {item.quantity}</option>)}</select><input type="number" min="1" step="1" value={returnQuantity} onChange={(e)=>setReturnQuantity(e.target.value)} required placeholder="Return quantity"/><button className="secondary-button" disabled={!returnSaleId || !returnProductId}>Accept & restock return</button></form>
           <small className="muted">Accepted units are restocked. Refund processing is not yet connected to a payment provider.</small>
+        </div>
+
+        <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">ONLINE PRESENCE</span><h3>Your individual store website</h3></div><span className={storeSettings?.isPublished ? "live-label" : "muted"}>{storeSettings?.isPublished ? "● PUBLISHED" : "NOT PUBLISHED"}</span></div>
+          <form className="inline-form" onSubmit={saveStorefront}><label className="store-setting-label">Store display name<input value={storeDisplayName} onChange={(e)=>setStoreDisplayName(e.target.value)} required placeholder="Shop name"/></label><div className="form-grid"><label className="store-setting-label">Brand colour<input type="color" value={storeColor} onChange={(e)=>setStoreColor(e.target.value)}/></label><label className="store-setting-label">Support phone<input value={storeSupportPhone} onChange={(e)=>setStoreSupportPhone(e.target.value)} placeholder="Customer support"/></label></div><label className="store-setting-label">Support email<input type="email" value={storeSupportEmail} onChange={(e)=>setStoreSupportEmail(e.target.value)} placeholder="support@yourshop.com"/></label><button className="secondary-button">{storeSettings?.isPublished ? "Save & unpublish store" : "Save & publish store"}</button></form>
+          <p className="store-url">https://{activeShop?.slug ?? "your-shop"}.usms.in</p>
         </div>
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">DAILY SNAPSHOT</span><h3>Business overview</h3></div></div>
           <div className="report-list"><div><span>Today's POS revenue</span><b>₹{Number(overview?.today.posRevenue ?? 0).toFixed(2)}</b></div><div><span>POS sales today</span><b>{overview?.today.posSalesCount ?? 0}</b></div><div><span>Purchase spend today</span><b>₹{Number(overview?.today.purchaseSpend ?? 0).toFixed(2)}</b></div><div><span>Online orders awaiting payment</span><b>{overview?.online.pendingOrders ?? 0}</b></div></div>
