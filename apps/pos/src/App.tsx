@@ -15,7 +15,7 @@ type Overview = { today: { posSalesCount: number; posRevenue: string; purchaseSp
 type StoreSettings = { displayName: string; primaryColor: string; supportEmail?: string | null; supportPhone?: string | null; isPublished: boolean };
 type GatewaySettings = { keyId: string; mode: "test" | "live"; isEnabled: boolean };
 type BusinessProfile = { shopName: string; legalName: string; gstin?: string | null; stateCode?: string | null; address?: Record<string, unknown>; timezone: string };
-type Invoice = { orderId: string; invoiceNumber: string; grandTotal: string; channel: string; status: string; issuedAt: string };
+type Invoice = { orderId: string; invoiceNumber: string; grandTotal: string; subtotal?: string; taxTotal?: string; channel: string; status: string; issuedAt: string; issuer?: Record<string, unknown>; customer?: Record<string, unknown> };\ntype InvoiceLine = { productName: string; sku?: string | null; hsnCode?: string | null; unitOfMeasure: string; quantity: number; unitPrice: string; taxRate: string; lineTotal: string };\ntype InvoiceDetail = { invoice: Invoice; items: InvoiceLine[]; documentType: string; gstReviewRequired: boolean };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -75,7 +75,7 @@ export default function App() {
   const [legalName, setLegalName] = useState("");
   const [gstin, setGstin] = useState("");
   const [stateCode, setStateCode] = useState("27");
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);\n  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetail | null>(null);\n  const [invoiceLoading, setInvoiceLoading] = useState(false);
 
   useEffect(() => {
     if (!supabase) { setAuthReady(true); return; }
@@ -246,7 +246,16 @@ export default function App() {
 
 
 
-  async function saveBusinessProfile(event: FormEvent) {
+
+  async function openInvoice(orderId: string) {
+    setInvoiceLoading(true); setError("");
+    try {
+      const data = await api<InvoiceDetail>(`/api/v1/business/invoices/${orderId}`, {}, tenantId);
+      setSelectedInvoice(data);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not open invoice."); }
+    finally { setInvoiceLoading(false); }
+  }
+\n  async function saveBusinessProfile(event: FormEvent) {
     event.preventDefault(); setError(""); setMessage("");
     try {
       const data = await api<{ profile: BusinessProfile }>("/api/v1/business/profile", {
@@ -415,9 +424,18 @@ export default function App() {
           <form className="inline-form" onSubmit={saveBusinessProfile}><label className="store-setting-label">Legal business name<input value={legalName} onChange={(e)=>setLegalName(e.target.value)} required placeholder="Legal name on invoice"/></label><div className="form-grid"><label className="store-setting-label">GSTIN (if registered)<input value={gstin} onChange={(e)=>setGstin(e.target.value.toUpperCase())} maxLength={15} placeholder="15-character GSTIN"/></label><label className="store-setting-label">State code<input value={stateCode} onChange={(e)=>setStateCode(e.target.value)} maxLength={2} required placeholder="27"/></label></div><button className="secondary-button">Save business identity</button></form><small className="muted">Invoice numbering is enabled. GST invoice format and tax split need professional review before production use.</small>
         </div>
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">SALES DOCUMENTS</span><h3>Recent invoices</h3></div><span className="muted">{invoices.length} ISSUED</span></div>
-          <div className="mini-records">{invoices.slice(0,8).map((invoice)=><div key={invoice.orderId}><b>{invoice.invoiceNumber}</b><span>{invoice.channel.toUpperCase()} · ₹{Number(invoice.grandTotal).toFixed(2)}</span></div>)}</div>
+          <div className="mini-records">{invoices.slice(0,8).map((invoice)=><div key={invoice.orderId}><b>{invoice.invoiceNumber}</b><span>{invoice.channel.toUpperCase()} · ₹{Number(invoice.grandTotal).toFixed(2)} <button className="tiny-action" onClick={()=>void openInvoice(invoice.orderId)}>View / print</button></span></div>)}</div>{invoiceLoading && <small className="muted">Opening invoice…</small>}
         </div>
       </section>
+
+    {selectedInvoice && <div className="invoice-overlay"><div className="invoice-print">
+      <div className="invoice-toolbar"><span>INVOICE PREVIEW · {selectedInvoice.invoice.invoiceNumber}</span><div><button onClick={()=>window.print()}>Print / Save PDF</button><button onClick={()=>setSelectedInvoice(null)}>Close</button></div></div>
+      <div className="invoice-paper"><div className="invoice-paper-head"><div><span className="eyebrow">USMS · SALES DOCUMENT</span><h2>{String(selectedInvoice.invoice.issuer?.legalName ?? selectedInvoice.invoice.issuer?.shopName ?? activeShop?.shopName ?? "Store")}</h2><p>{String(selectedInvoice.invoice.issuer?.gstin ?? "GSTIN not provided")} · State {String(selectedInvoice.invoice.issuer?.stateCode ?? "—")}</p></div><div className="invoice-number"><span>SALES INVOICE</span><b>{selectedInvoice.invoice.invoiceNumber}</b><small>{new Date(selectedInvoice.invoice.issuedAt).toLocaleString("en-IN")}</small></div></div>
+      <div className="invoice-customer"><span>BILL TO</span><b>{String(selectedInvoice.invoice.customer?.name ?? "Walk-in customer")}</b><small>{String(selectedInvoice.invoice.customer?.phone ?? "")}</small></div>
+      <table className="invoice-table"><thead><tr><th>Item</th><th>HSN</th><th>Qty</th><th>Rate</th><th>Tax %</th><th>Amount</th></tr></thead><tbody>{selectedInvoice.items.map((item,i)=><tr key={i}><td>{item.productName}<small>{item.sku ?? ""}</small></td><td>{item.hsnCode ?? "—"}</td><td>{item.quantity} {item.unitOfMeasure}</td><td>₹{Number(item.unitPrice).toFixed(2)}</td><td>{Number(item.taxRate).toFixed(2)}%</td><td>₹{Number(item.lineTotal).toFixed(2)}</td></tr>)}</tbody></table>
+      <div className="invoice-totals"><div><span>Subtotal</span><b>₹{Number(selectedInvoice.invoice.subtotal ?? 0).toFixed(2)}</b></div><div><span>Tax total</span><b>₹{Number(selectedInvoice.invoice.taxTotal ?? 0).toFixed(2)}</b></div><div className="invoice-grand"><span>Grand total</span><b>₹{Number(selectedInvoice.invoice.grandTotal).toFixed(2)}</b></div></div>
+      <p className="invoice-disclaimer">Sales invoice preview. GST tax classification, place-of-supply treatment and statutory invoice formatting require review by a qualified Indian tax professional before production use.</p><div className="invoice-thanks">Thank you for shopping with us.</div></div>
+    </div></div>}
       <footer className="business-footer"><span>USMS · Unified Store Management System</span><span>Shop ID · {tenantId.slice(0,8)}</span></footer>
     </section>
   </main>;
