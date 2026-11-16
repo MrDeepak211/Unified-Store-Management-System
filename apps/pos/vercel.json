@@ -1,0 +1,5 @@
+{
+  "buildCommand": "cd ../.. && pnpm install --frozen-lockfile && pnpm --filter @usms/pos build",
+  "outputDirectory": "apps/pos/dist",
+  "rewrites": [{ "source": "/(.*)", "destination": "/" }]
+}
