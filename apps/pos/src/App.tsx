@@ -253,9 +253,7 @@ export default function App() {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const frames = buffer.split("
-
-");
+          const frames = buffer.split("\n\n");
           buffer = frames.pop() ?? "";
           if (frames.some((frame) => frame.startsWith("data: "))) void loadBusinessData(tenantId);
         }
@@ -521,6 +519,8 @@ export default function App() {
         body: JSON.stringify({ branchId, customerId: selectedCustomerId || undefined, paymentMethod, items: cart }),
       }, tenantId);
       setCart([]);
+      setSelectedCustomerId("");
+      setPaymentMethod("cash");
       await loadBusinessData();
       setMessage(`Sale ${data.order.orderNumber} · Invoice ${data.order.invoiceNumber} · ₹${data.order.grandTotal}`);
     } catch (e) {
@@ -528,6 +528,8 @@ export default function App() {
         try {
           await enqueuePendingSale({ branchId, customerId: selectedCustomerId || undefined, paymentMethod, items: cart });
           setCart([]);
+          setSelectedCustomerId("");
+          setPaymentMethod("cash");
           setPendingCount((count) => (count ?? 0) + 1);
           setMessage("Offline sale saved on this device. It is NOT confirmed yet; stock will be validated when the connection returns.");
         } catch {
