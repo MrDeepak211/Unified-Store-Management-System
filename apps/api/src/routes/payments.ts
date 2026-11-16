@@ -1,4 +1,4 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { requireTenantActor } from "../auth.js";
 import { decryptPaymentSecret, encryptPaymentSecret } from "../paymentCrypto.js";
@@ -160,7 +160,7 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
     let tenantId: string;
     let keyId: string;
     let keySecret: string;
-    let order: { id: string; branch_id: string; status: string; reservation_expires_at: Date; grand_total: string };
+    let order: { id: string; branch_id: string; status: string; payment_status: string; reservation_expires_at: Date; grand_total: string };
     try {
       await client.query("BEGIN");
       const tenant = await client.query("SELECT id FROM tenants WHERE slug = $1 AND status = 'active' LIMIT 1", [request.params.slug.toLowerCase()]);
@@ -171,7 +171,7 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       }
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
       const result = await client.query(
-        `SELECT id, branch_id, status, reservation_expires_at, grand_total::text
+        `SELECT id, branch_id, status, payment_status, reservation_expires_at, grand_total::text
          FROM sales_orders WHERE tenant_id = $1 AND id = $2 AND public_tracking_token_hash = $3 LIMIT 1`,
         [tenantId, request.params.orderId, tokenHash],
       );
@@ -187,7 +187,7 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       }
       keyId = gateway.rows[0].key_id as string;
       keySecret = decryptPaymentSecret(gateway.rows[0].key_secret_ciphertext as string);
-      const payment = await client.query(
+      if (order.status === "confirmed" && order.payment_status === "paid") {\n        await client.query("COMMIT");\n        return reply.send({ status: "paid", orderId: order.id, message: "Payment was already verified." });\n      }\n      const payment = await client.query(
         "SELECT id, provider_order_id, amount_paise, status FROM payments WHERE tenant_id = $1 AND sales_order_id = $2 AND provider = 'razorpay' LIMIT 1",
         [tenantId, order.id],
       );
@@ -236,7 +236,7 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
         "SELECT status, reservation_expires_at FROM sales_orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
         [tenantId, order.id],
       );
-      if (!locked.rowCount || locked.rows[0].status !== "pending" || new Date(locked.rows[0].reservation_expires_at).getTime() <= Date.now()) {
+      if (locked.rowCount && locked.rows[0].status === "confirmed") return { expired: false, alreadyPaid: true };\n      if (!locked.rowCount || locked.rows[0].status !== "pending" || new Date(locked.rows[0].reservation_expires_at).getTime() <= Date.now()) {
         await db.query("UPDATE payments SET status = 'refund_pending', provider_payment_id = $3, updated_at = now() WHERE tenant_id = $1 AND sales_order_id = $2", [tenantId, order.id, body.razorpayPaymentId]);
         return { expired: true };
       }
@@ -262,7 +262,7 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       await db.query("UPDATE sales_orders SET status = 'confirmed', payment_status = 'paid' WHERE tenant_id = $1 AND id = $2", [tenantId, order.id]);
       await db.query("UPDATE payments SET status = 'captured', provider_payment_id = $3, updated_at = now() WHERE tenant_id = $1 AND sales_order_id = $2", [tenantId, order.id, body.razorpayPaymentId]);
       await notifyInventoryChanged(db, { tenantId: tenantId!, branchId: order.branch_id, productIds: items.rows.map((item) => item.product_id as string) });
-      return { expired: false };
+      return { expired: false, alreadyPaid: false };
     });
     if (finalized.expired) {
       // Payment was captured after the stock reservation expired. Do not fulfil; request a refund.
@@ -272,6 +272,6 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       });
       return reply.code(409).send({ error: { code: "RESERVATION_EXPIRED", message: "The stock reservation expired. A refund request has been sent to the payment provider." } });
     }
-    return { status: "paid", orderId: order.id, message: "Payment verified and stock committed." };
+    return { status: "paid", orderId: order.id, message: finalized.alreadyPaid ? "Payment was already verified." : "Payment verified and stock committed." };
   });
 }
