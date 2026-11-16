@@ -97,7 +97,7 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
       let taxTotal = 0n;
       for (const item of body.items) {
         const productResult = await client.query(
-          "SELECT id, price::text, tax_rate::text FROM products WHERE tenant_id = $1 AND id = $2 AND is_active = true",
+          "SELECT id, name, sku, hsn_code, unit_of_measure, price::text, tax_rate::text FROM products WHERE tenant_id = $1 AND id = $2 AND is_active = true",
           [tenantId, item.productId],
         );
         const product = productResult.rows[0];
@@ -118,7 +118,7 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
         await client.query(
           `INSERT INTO sales_order_items (tenant_id, order_id, product_id, quantity, unit_price, tax_rate, line_total)
            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [tenantId, orderId, item.productId, item.quantity, product.price, product.tax_rate, money(lineCents)],
+          [tenantId, orderId, item.productId, item.quantity, product.price, product.tax_rate, money(lineCents), product.name, product.sku, product.hsn_code, product.unit_of_measure],
         );
         await client.query(
           `INSERT INTO inventory_movements
