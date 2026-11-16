@@ -152,4 +152,54 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
       client.release();
     }
   });
+
+  app.get<{ Params: { slug: string; orderId: string }; Querystring: { token?: string } }>("/api/v1/storefront/:slug/orders/:orderId", async (request, reply) => {
+    const token = request.query.token;
+    if (!token || token.length < 32 || token.length > 128) {
+      return reply.code(400).send({ error: { code: "TRACKING_TOKEN_REQUIRED", message: "A valid order tracking token is required." } });
+    }
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    const client = await getPool().connect();
+    try {
+      await client.query("BEGIN");
+      const tenantResult = await client.query(
+        "SELECT id FROM tenants WHERE slug = $1 AND status = 'active' LIMIT 1",
+        [request.params.slug.toLowerCase()],
+      );
+      const tenantId = tenantResult.rows[0]?.id as string | undefined;
+      if (!tenantId) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ error: { code: "ORDER_NOT_FOUND", message: "Order not found." } });
+      }
+      await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+      const orderResult = await client.query(
+        `SELECT id, order_number AS "orderNumber", status, payment_status AS "paymentStatus",
+                grand_total::text AS "grandTotal", created_at AS "createdAt",
+                reservation_expires_at AS "reservationExpiresAt"
+         FROM sales_orders
+         WHERE tenant_id = $1 AND id = $2 AND public_tracking_token_hash = $3
+         LIMIT 1`,
+        [tenantId, request.params.orderId, tokenHash],
+      );
+      if (!orderResult.rowCount) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ error: { code: "ORDER_NOT_FOUND", message: "Order not found." } });
+      }
+      const items = await client.query(
+        `SELECT p.name, i.quantity, i.unit_price::text AS "unitPrice", i.line_total::text AS "lineTotal"
+         FROM sales_order_items i
+         JOIN products p ON p.tenant_id = i.tenant_id AND p.id = i.product_id
+         WHERE i.tenant_id = $1 AND i.order_id = $2`,
+        [tenantId, request.params.orderId],
+      );
+      await client.query("COMMIT");
+      return { order: orderResult.rows[0], items: items.rows };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
 }
