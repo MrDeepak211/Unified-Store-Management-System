@@ -62,6 +62,7 @@ export default function App() {
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerPhone, setNewCustomerPhone] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "upi" | "card" | "bank_transfer" | "credit">("cash");
   const [newSupplierName, setNewSupplierName] = useState("");
   const [newSupplierPhone, setNewSupplierPhone] = useState("");
   const [purchaseProductId, setPurchaseProductId] = useState("");
@@ -129,7 +130,7 @@ export default function App() {
     const rows = await listPendingSales();
     for (const row of rows) {
       if (row.status === "failed") continue;
-      const payload = row.payload as { branchId: string; items: CartLine[] };
+      const payload = row.payload as { branchId: string; items: CartLine[]; customerId?: string; paymentMethod?: string };
       try {
         await api("/api/v1/pos/sales", {
           method: "POST",
@@ -252,7 +253,9 @@ export default function App() {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const frames = buffer.split("\n\n");
+          const frames = buffer.split("
+
+");
           buffer = frames.pop() ?? "";
           if (frames.some((frame) => frame.startsWith("data: "))) void loadBusinessData(tenantId);
         }
@@ -515,7 +518,7 @@ export default function App() {
     try {
       const data = await api<{ order: { orderNumber: string; invoiceNumber: string; grandTotal: string } }>("/api/v1/pos/sales", {
         method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() },
-        body: JSON.stringify({ branchId, customerId: selectedCustomerId || undefined, items: cart }),
+        body: JSON.stringify({ branchId, customerId: selectedCustomerId || undefined, paymentMethod, items: cart }),
       }, tenantId);
       setCart([]);
       await loadBusinessData();
@@ -523,7 +526,7 @@ export default function App() {
     } catch (e) {
       if (e instanceof TypeError) {
         try {
-          await enqueuePendingSale({ branchId, items: cart });
+          await enqueuePendingSale({ branchId, customerId: selectedCustomerId || undefined, paymentMethod, items: cart });
           setCart([]);
           setPendingCount((count) => (count ?? 0) + 1);
           setMessage("Offline sale saved on this device. It is NOT confirmed yet; stock will be validated when the connection returns.");
@@ -555,7 +558,7 @@ export default function App() {
         <form className="inline-form" onSubmit={addProduct}><h4>Add a product</h4><div className="form-grid"><input value={newSku} onChange={(e)=>setNewSku(e.target.value)} required placeholder="SKU / barcode"/><input value={newName} onChange={(e)=>setNewName(e.target.value)} required placeholder="Product name"/><input value={newPrice} onChange={(e)=>setNewPrice(e.target.value)} required type="number" min="0" step="0.01" placeholder="Price ₹"/><input value={newTax} onChange={(e)=>setNewTax(e.target.value)} type="number" min="0" max="100" step="0.01" placeholder="Tax %"/><input value={newHsn} onChange={(e)=>setNewHsn(e.target.value)} placeholder="HSN code (optional)"/><input value={newUnit} onChange={(e)=>setNewUnit(e.target.value)} placeholder="Unit (PCS, KG, LTR)"/><input value={newBarcode} onChange={(e)=>setNewBarcode(e.target.value)} placeholder="Barcode (optional)"/><select value={newCategoryId} onChange={(e)=>setNewCategoryId(e.target.value)}><option value="">No category</option>{categories.map((cat)=><option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></div><button className="secondary-button" disabled={!branchId}>Save product</button></form><form className="inline-form" onSubmit={addCategory}><h4>Create category</h4><div className="form-grid"><input value={newCategoryName} onChange={(e)=>setNewCategoryName(e.target.value)} required placeholder="Category name"/></div><button className="secondary-button">Add category</button></form>
         <form className="inline-form stock-form" onSubmit={adjustStock}><h4>Receive / adjust stock</h4><div className="form-grid"><select value={stockProductId} onChange={(e)=>setStockProductId(e.target.value)} required><option value="">Select product</option>{products.map((p)=><option key={p.id} value={p.id}>{p.name} · {p.availableStock} available</option>)}</select><input type="number" step="1" value={stockDelta} onChange={(e)=>setStockDelta(e.target.value)} required placeholder="Quantity change (+/-)"/></div><button className="secondary-button" disabled={!stockProductId}>Update stock</button></form>
       </div>
-      <div className="panel-card pos-card" id="billing"><div className="panel-heading"><div><span className="eyebrow">COUNTER BILLING</span><h3>Quick sale</h3></div><span className="live-label">● LIVE STOCK</span></div><form className="barcode-search" onSubmit={scanProduct}><input autoFocus value={barcodeSearch} onChange={(e)=>setBarcodeSearch(e.target.value)} placeholder="Scan barcode or enter SKU, then press Enter"/><button>Find / add</button></form><div className="pos-products">{products.filter((p)=>p.availableStock>0).slice(0,8).map((product)=><button key={product.id} className="pos-product" onClick={()=>addToCart(product)}><span>{product.name}</span><b>₹{Number(product.price).toFixed(2)}</b><small>{product.availableStock} available · Add +</small></button>)}</div><div className="sale-summary"><h4>Current bill <span>{cart.reduce((n,l)=>n+l.quantity,0)} items</span></h4><select className="sale-customer" value={selectedCustomerId} onChange={(e)=>setSelectedCustomerId(e.target.value)}><option value="">Walk-in customer</option>{customers.map((customer)=><option key={customer.id} value={customer.id}>{customer.name}{customer.phone ? " · "+customer.phone : ""}</option>)}</select>{cart.map((line)=>{const product=products.find((p)=>p.id===line.productId);return <div className="bill-line" key={line.productId}><span>{product?.name} × {line.quantity}</span><b>₹{((Number(product?.price??0)*line.quantity)*(1+Number(product?.taxRate??0)/100)).toFixed(2)}</b><button onClick={()=>setCart((current)=>current.filter((x)=>x.productId!==line.productId))}>×</button></div>})}<div className="bill-total"><span>Estimated total</span><strong>₹{cartTotal.toFixed(2)}</strong></div><button className="primary-button" disabled={!cart.length || loading} onClick={()=>void completeSale()}>Complete sale · ₹{cartTotal.toFixed(2)} ↗</button><small>Server verifies final prices and available stock before billing.</small></div></div></section>
+      <div className="panel-card pos-card" id="billing"><div className="panel-heading"><div><span className="eyebrow">COUNTER BILLING</span><h3>Quick sale</h3></div><span className="live-label">● LIVE STOCK</span></div><form className="barcode-search" onSubmit={scanProduct}><input autoFocus value={barcodeSearch} onChange={(e)=>setBarcodeSearch(e.target.value)} placeholder="Scan barcode or enter SKU, then press Enter"/><button>Find / add</button></form><div className="pos-products">{products.filter((p)=>p.availableStock>0).slice(0,8).map((product)=><button key={product.id} className="pos-product" onClick={()=>addToCart(product)}><span>{product.name}</span><b>₹{Number(product.price).toFixed(2)}</b><small>{product.availableStock} available · Add +</small></button>)}</div><div className="sale-summary"><h4>Current bill <span>{cart.reduce((n,l)=>n+l.quantity,0)} items</span></h4><select className="sale-customer" value={selectedCustomerId} onChange={(e)=>setSelectedCustomerId(e.target.value)}><option value="">Walk-in customer</option>{customers.map((customer)=><option key={customer.id} value={customer.id}>{customer.name}{customer.phone ? " · "+customer.phone : ""}</option>)}</select><select className="sale-customer" value={paymentMethod} onChange={(e)=>setPaymentMethod(e.target.value as typeof paymentMethod)}><option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option><option value="bank_transfer">Bank transfer</option><option value="credit">Credit</option></select>{cart.map((line)=>{const product=products.find((p)=>p.id===line.productId);return <div className="bill-line" key={line.productId}><span>{product?.name} × {line.quantity}</span><b>₹{((Number(product?.price??0)*line.quantity)*(1+Number(product?.taxRate??0)/100)).toFixed(2)}</b><button onClick={()=>setCart((current)=>current.filter((x)=>x.productId!==line.productId))}>×</button></div>})}<div className="bill-total"><span>Estimated total</span><strong>₹{cartTotal.toFixed(2)}</strong></div><button className="primary-button" disabled={!cart.length || loading} onClick={()=>void completeSale()}>Complete sale · ₹{cartTotal.toFixed(2)} ↗</button><small>Server verifies final prices and available stock before billing.</small></div></div></section>
 
       <section className="support-grid">
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">RELATIONSHIPS</span><h3>Customers & suppliers</h3></div></div>
