@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { Client, type PoolClient } from "pg";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { requireTenantActor } from "../auth.js";
 import { getPool, withTenantTransaction } from "../db.js";
 
@@ -44,9 +44,8 @@ export async function notifyInventoryChanged(
 }
 
 function streamInventoryEvents(
-  app: FastifyInstance,
-  request: Parameters<Parameters<FastifyInstance["get"]>[1]>[0],
-  reply: Parameters<Parameters<FastifyInstance["get"]>[1]>[1],
+  request: FastifyRequest,
+  reply: FastifyReply,
   tenantId: string,
 ) {
   reply.hijack();
@@ -56,7 +55,6 @@ function streamInventoryEvents(
     "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
     "X-Accel-Buffering": "no",
-    "Access-Control-Allow-Origin": process.env.WEB_ORIGIN?.split(",").map((v) => v.trim()).join(",") ?? "*",
   });
   response.write("retry: 3000\n\n");
   const send = (event: InventoryEvent) => {
@@ -73,7 +71,7 @@ function streamInventoryEvents(
 export async function registerInventoryEventRoutes(app: FastifyInstance) {
   app.get("/api/v1/business/events", async (request, reply) => {
     const actor = await requireTenantActor(request);
-    streamInventoryEvents(app, request, reply, actor.tenantId);
+    streamInventoryEvents(request, reply, actor.tenantId);
   });
 
   app.get<{ Params: { slug: string } }>("/api/v1/storefront/:slug/events", async (request, reply) => {
@@ -88,6 +86,6 @@ export async function registerInventoryEventRoutes(app: FastifyInstance) {
       return Boolean(result.rowCount);
     });
     if (!published) return reply.code(404).send({ error: { code: "STORE_NOT_FOUND", message: "Store not found." } });
-    streamInventoryEvents(app, request, reply, tenantId);
+    streamInventoryEvents(request, reply, tenantId);
   });
 }
