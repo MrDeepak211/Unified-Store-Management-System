@@ -96,6 +96,36 @@ export default function App() {
     }
   }, [tenantId, session]);
 
+
+  useEffect(() => {
+    if (!session || !tenantId) return;
+    const controller = new AbortController();
+    async function streamInventory() {
+      try {
+        const response = await fetch(API_URL + "/api/v1/business/events", {
+          headers: { Authorization: `Bearer ${session!.access_token}`, "X-USMS-Tenant": tenantId },
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) return;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!controller.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split("\n\n");
+          buffer = frames.pop() ?? "";
+          if (frames.some((frame) => frame.startsWith("data: "))) void loadBusinessData(tenantId);
+        }
+      } catch (e) {
+        if (!controller.signal.aborted) console.warn("Inventory live updates disconnected.", e);
+      }
+    }
+    void streamInventory();
+    return () => controller.abort();
+  }, [session, tenantId]);
+
   async function authenticate(event: FormEvent) {
     event.preventDefault();
     if (!supabase) return;
