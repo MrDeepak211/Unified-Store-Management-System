@@ -25,7 +25,7 @@ export async function registerOnlineOrderManagementRoutes(app: FastifyInstance) 
          LEFT JOIN payments p ON p.tenant_id = o.tenant_id AND p.sales_order_id = o.id
          WHERE o.tenant_id = $1 AND o.channel = 'online'
            AND ($2::uuid[] IS NULL OR o.branch_id = ANY($2))
-         GROUP BY o.id, b.name
+         GROUP BY o.id, b.name, p.status
          ORDER BY o.created_at DESC LIMIT 200`,
         [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
       );
