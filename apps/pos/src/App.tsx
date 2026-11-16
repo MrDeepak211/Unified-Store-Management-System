@@ -194,6 +194,13 @@ export default function App() {
 
   useEffect(() => { if (session) void loadShops(); else { setShops([]); setProducts([]); } }, [session]);
   useEffect(() => {
+    if (!session || !tenantId) return;
+    const onOnline = () => { void syncPendingQueue(); };
+    window.addEventListener("online", onOnline);
+    void syncPendingQueue();
+    return () => window.removeEventListener("online", onOnline);
+  }, [session, tenantId]);
+  useEffect(() => {
     if (tenantId && session) {
       localStorage.setItem("usms.activeTenant", tenantId);
       void loadBusinessData(tenantId);
