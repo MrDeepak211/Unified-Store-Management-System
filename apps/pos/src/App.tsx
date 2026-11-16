@@ -349,12 +349,12 @@ export default function App() {
     } catch (e) { setError(e instanceof Error ? e.message : "Could not record expense."); }
   }
 
-  async function updateOnlineOrder(orderId: string, action: "fulfil" | "cancel") {
+  async function updateOnlineOrder(orderId: string, action: "fulfil" | "cancel" | "refund") {
     setError(""); setMessage("");
     try {
       await api(`/api/v1/business/online-orders/${orderId}/${action}`, { method: "POST" }, tenantId);
       await loadBusinessData();
-      setMessage(action === "fulfil" ? "Online order marked fulfilled." : "Unpaid online order cancelled and stock released.");
+      setMessage(action === "fulfil" ? "Online order marked fulfilled." : action === "cancel" ? "Unpaid online order cancelled and stock released." : "Refund requested. Stock will be restored after the payment provider confirms the refund.");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not update online order."); }
   }
 
@@ -620,7 +620,7 @@ export default function App() {
         </div>}
 
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">ONLINE CHANNEL</span><h3>Online orders</h3></div><span className="muted">{onlineOrders.length} ORDERS</span></div>
-          <div className="mini-records">{onlineOrders.slice(0,12).map((order)=><div key={order.id} className="online-order-row"><div><b>{order.orderNumber}</b><small>{order.customerName ?? "Online customer"} · {order.branchName} · {order.status.toUpperCase()} / {order.paymentStatus.toUpperCase()}</small><small>{order.items.map((item)=>`${item.productName} × ${item.quantity}`).join(", ")}</small><small>{order.deliveryAddress ? `${order.deliveryAddress.line1}, ${order.deliveryAddress.city}, ${order.deliveryAddress.state} - ${order.deliveryAddress.pincode}` : "Pickup / address not supplied"}</small></div><div className="online-order-actions"><b>₹{Number(order.grandTotal).toFixed(2)}</b>{order.status==="confirmed" && order.paymentStatus==="paid" && <button className="tiny-action" onClick={()=>void updateOnlineOrder(order.id,"fulfil")}>Mark fulfilled</button>}{order.status==="pending" && order.paymentStatus==="pending" && <button className="tiny-action" onClick={()=>void updateOnlineOrder(order.id,"cancel")}>Cancel & release</button>}</div></div>)}</div>
+          <div className="mini-records">{onlineOrders.slice(0,12).map((order)=><div key={order.id} className="online-order-row"><div><b>{order.orderNumber}</b><small>{order.customerName ?? "Online customer"} · {order.branchName} · {order.status.toUpperCase()} / {order.paymentStatus.toUpperCase()}</small><small>{order.items.map((item)=>`${item.productName} × ${item.quantity}`).join(", ")}</small><small>{order.deliveryAddress ? `${order.deliveryAddress.line1}, ${order.deliveryAddress.city}, ${order.deliveryAddress.state} - ${order.deliveryAddress.pincode}` : "Pickup / address not supplied"}</small></div><div className="online-order-actions"><b>₹{Number(order.grandTotal).toFixed(2)}</b>{order.status==="confirmed" && order.paymentStatus==="paid" && <><button className="tiny-action" onClick={()=>void updateOnlineOrder(order.id,"fulfil")}>Mark fulfilled</button>{(activeShop?.role==="owner" || activeShop?.role==="admin") && <button className="tiny-action" onClick={()=>void updateOnlineOrder(order.id,"refund")}>Request refund</button>}</>}{order.status==="pending" && order.paymentStatus==="pending" && <button className="tiny-action" onClick={()=>void updateOnlineOrder(order.id,"cancel")}>Cancel & release</button>}</div></div>)}</div>
         </div>
 
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">EXPENSES & CASHBOOK</span><h3>Record business expense</h3></div></div>
