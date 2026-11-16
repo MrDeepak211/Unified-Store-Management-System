@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
@@ -36,6 +37,10 @@ export async function registerSaleRoutes(app: FastifyInstance) {
     if (!body.branchId || !Array.isArray(body.items) || body.items.length === 0 || body.items.length > 100) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "A branch and at least one sale item are required." } });
     }
+    const productIds = body.items.map((item) => item.productId);
+    if (new Set(productIds).size !== productIds.length) {
+      return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Each product may appear only once in a sale; combine its quantity." } });
+    }
     for (const item of body.items) {
       if (!item.productId || !Number.isSafeInteger(item.quantity) || item.quantity < 1 || item.quantity > 100000) {
         return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Each item needs a product ID and a positive whole-number quantity." } });
@@ -45,7 +50,7 @@ export async function registerSaleRoutes(app: FastifyInstance) {
     try {
       const result = await withTenantTransaction(actor.tenantId, async (client) => {
         const prior = await client.query(
-          "SELECT id, order_number, status, grand_total::text FROM sales_orders WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1",
+          "SELECT id, order_number AS \"orderNumber\", status, grand_total::text AS \"grandTotal\" FROM sales_orders WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1",
           [actor.tenantId, key],
         );
         if (prior.rowCount) return { order: prior.rows[0], replayed: true };
@@ -53,7 +58,7 @@ export async function registerSaleRoutes(app: FastifyInstance) {
         const branch = await client.query("SELECT id FROM branches WHERE tenant_id = $1 AND id = $2", [actor.tenantId, body.branchId]);
         if (!branch.rowCount) throw Object.assign(new Error("Selected branch was not found."), { statusCode: 404 });
 
-        const orderNumber = `POS-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+        const orderNumber = `POS-${randomUUID().slice(0, 8).toUpperCase()}`;
         const orderId = (await client.query(
           `INSERT INTO sales_orders (tenant_id, branch_id, channel, status, order_number, customer_name, customer_phone, idempotency_key)
            VALUES ($1, $2, 'pos', 'confirmed', $3, $4, $5, $6) RETURNING id`,
@@ -78,7 +83,7 @@ export async function registerSaleRoutes(app: FastifyInstance) {
             [actor.tenantId, body.branchId, item.productId, item.quantity],
           );
           if (!stock.rowCount) {
-            throw Object.assign(new Error(`Insufficient available stock for SKU product ${item.productId}.`), { statusCode: 409 });
+            throw Object.assign(new Error(`Insufficient available stock for product ${item.productId}.`), { statusCode: 409 });
           }
 
           const unitCents = decimalToCents(product.price);
