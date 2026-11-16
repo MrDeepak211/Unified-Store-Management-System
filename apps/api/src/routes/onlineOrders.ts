@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { getPool } from "../db.js";
 
@@ -38,6 +38,10 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Use unique products with whole-number quantities from 1 to 100." } });
     }
 
+    const trackingSecret = process.env.ORDER_TRACKING_SECRET;
+    if (!trackingSecret || trackingSecret.length < 32) {
+      return reply.code(503).send({ error: { code: "CHECKOUT_NOT_CONFIGURED", message: "Online checkout is not configured yet." } });
+    }
     const client = await getPool().connect();
     try {
       await client.query("BEGIN");
