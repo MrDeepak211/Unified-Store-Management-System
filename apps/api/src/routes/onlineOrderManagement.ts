@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { assertBranchAccess, requireTenantActor } from "../auth.js";
+import { decryptPaymentSecret } from "../paymentCrypto.js";
 import { withTenantTransaction } from "../db.js";
 import { notifyInventoryChanged } from "./inventoryEvents.js";
 
@@ -85,4 +86,53 @@ export async function registerOnlineOrderManagementRoutes(app: FastifyInstance) 
     if ("error" in result) return reply.code(result.error === "NOT_FOUND" ? 404 : 409).send({ error: { code: result.error, message: result.error === "NOT_FOUND" ? "Online order not found." : "Paid orders require a verified refund workflow and cannot be cancelled here." } });
     return result;
   });
+  app.post<{ Params: { orderId: string } }>("/api/v1/business/online-orders/:orderId/refund", async (request, reply) => {
+    const actor = await requireTenantActor(request, ["owner", "admin"]);
+    const details = await withTenantTransaction(actor.tenantId, async (client) => {
+      const order = await client.query(
+        "SELECT id, branch_id, status, payment_status FROM sales_orders WHERE tenant_id = $1 AND id = $2 AND channel = 'online' FOR UPDATE",
+        [actor.tenantId, request.params.orderId],
+      );
+      if (!order.rowCount) return { error: "NOT_FOUND" as const };
+      assertBranchAccess(actor, order.rows[0].branch_id);
+      if (order.rows[0].status !== "confirmed" || order.rows[0].payment_status !== "paid") return { error: "NOT_REFUNDABLE" as const };
+      const payment = await client.query(
+        "SELECT id, provider_payment_id, amount_paise, status FROM payments WHERE tenant_id = $1 AND sales_order_id = $2 AND provider = 'razorpay' FOR UPDATE",
+        [actor.tenantId, request.params.orderId],
+      );
+      if (!payment.rowCount || !payment.rows[0].provider_payment_id) return { error: "PAYMENT_NOT_FOUND" as const };
+      if (payment.rows[0].status === "refund_pending" || payment.rows[0].status === "refunded") return { error: "REFUND_ALREADY_REQUESTED" as const };
+      const gateway = await client.query(
+        "SELECT key_id, key_secret_ciphertext FROM payment_gateway_accounts WHERE tenant_id = $1 AND provider = 'razorpay' AND is_enabled = true LIMIT 1",
+        [actor.tenantId],
+      );
+      if (!gateway.rowCount) return { error: "GATEWAY_NOT_CONFIGURED" as const };
+      return {
+        paymentId: payment.rows[0].id as string,
+        providerPaymentId: payment.rows[0].provider_payment_id as string,
+        amount: Number(payment.rows[0].amount_paise),
+        keyId: gateway.rows[0].key_id as string,
+        keySecret: decryptPaymentSecret(gateway.rows[0].key_secret_ciphertext as string),
+      };
+    });
+    if ("error" in details) {
+      const status = details.error === "NOT_FOUND" ? 404 : details.error === "NOT_REFUNDABLE" || details.error === "REFUND_ALREADY_REQUESTED" ? 409 : 503;
+      return reply.code(status).send({ error: { code: details.error, message: details.error === "NOT_FOUND" ? "Order not found." : details.error === "NOT_REFUNDABLE" ? "Only paid, unfulfilled online orders can be refunded here." : details.error === "REFUND_ALREADY_REQUESTED" ? "A refund has already been requested." : "The payment record or gateway configuration is unavailable." } });
+    }
+    const response = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(details.providerPaymentId)}/refund`, {
+      method: "POST",
+      headers: { Authorization: "Basic " + Buffer.from(`${details.keyId}:${details.keySecret}`).toString("base64"), "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: details.amount, notes: { usms_order_id: request.params.orderId, reason: "Shop initiated online order cancellation/refund" } }),
+    });
+    const refund = await response.json() as { id?: string; status?: string; error?: { description?: string } };
+    if (!response.ok || !refund.id) {
+      request.log.error({ status: response.status, error: refund.error?.description }, "Razorpay refund request failed");
+      return reply.code(502).send({ error: { code: "REFUND_REQUEST_FAILED", message: "Payment provider could not accept the refund request." } });
+    }
+    await withTenantTransaction(actor.tenantId, async (client) => {
+      await client.query("UPDATE payments SET status = 'refund_pending', updated_at = now() WHERE tenant_id = $1 AND id = $2", [actor.tenantId, details.paymentId]);
+    });
+    return { refund: { provider: "razorpay", refundId: refund.id, status: refund.status ?? "pending" }, message: "Refund request accepted by the payment provider. Final status will update from the signed webhook." };
+  });
+
 }
