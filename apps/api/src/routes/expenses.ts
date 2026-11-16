@@ -28,7 +28,7 @@ export async function registerExpenseRoutes(app: FastifyInstance) {
     const amount = String(body.amount ?? "");
     if (typeof key !== "string" || key.length < 8 || key.length > 128) return reply.code(400).send({ error: { code: "IDEMPOTENCY_KEY_REQUIRED", message: "Expense requires an Idempotency-Key header." } });
     if (!body.branchId || category.length < 2 || category.length > 60 || description.length < 2 || description.length > 240 ||
-        !/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) <= 0 ||
+        !/^\d+(?:\.\d{1,2})?$/.test(amount) || !Number.isFinite(Number(amount)) || Number(amount) <= 0 || Number(amount) > 9999999999.99 ||
         !["cash","upi","card","bank_transfer"].includes(body.paymentMethod ?? "")) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Provide a branch, category, description, positive amount and payment method." } });
     }
