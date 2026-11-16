@@ -16,6 +16,26 @@ function centsToAmount(value: bigint): string {
 }
 
 export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
+  app.get("/api/v1/business/sales", async (request) => {
+    const actor = await requireTenantActor(request);
+    return withTenantTransaction(actor.tenantId, async (client) => {
+      const result = await client.query(
+        `SELECT o.id, o.order_number AS "orderNumber", o.channel, o.status,
+                o.grand_total::text AS "grandTotal", o.created_at AS "createdAt",
+                COALESCE(json_agg(json_build_object('productId', i.product_id, 'quantity', i.quantity, 'unitPrice', i.unit_price::text))
+                  FILTER (WHERE i.id IS NOT NULL), '[]'::json) AS items
+         FROM sales_orders o
+         LEFT JOIN sales_order_items i ON i.tenant_id = o.tenant_id AND i.order_id = o.id
+         WHERE o.tenant_id = $1
+         GROUP BY o.id
+         ORDER BY o.created_at DESC
+         LIMIT 100`,
+        [actor.tenantId],
+      );
+      return { sales: result.rows };
+    });
+  });
+
   app.post<{ Params: { saleId: string }; Body: ReturnBody }>("/api/v1/business/sales/:saleId/returns", async (request, reply) => {
     const actor = await requireTenantActor(request, ["owner", "admin", "manager"]);
     const key = request.headers["idempotency-key"];
