@@ -7,6 +7,7 @@ type OnlineOrderBody = {
   customerName?: string;
   customerPhone?: string;
   customerEmail?: string;
+  deliveryAddress?: { line1?: string; line2?: string; city?: string; state?: string; pincode?: string; country?: string };
   items?: Array<{ productId: string; quantity: number }>;
 };
 
@@ -31,8 +32,8 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
     if (typeof key !== "string" || key.length < 8 || key.length > 128) {
       return reply.code(400).send({ error: { code: "IDEMPOTENCY_KEY_REQUIRED", message: "Checkout requires a unique Idempotency-Key header." } });
     }
-    if (!body.customerName?.trim() || !body.customerPhone?.trim() || !Array.isArray(body.items) || body.items.length === 0 || body.items.length > 50) {
-      return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Customer name, phone and at least one item are required." } });
+    if (!body.customerName?.trim() || !body.customerPhone?.trim() || !body.deliveryAddress?.line1?.trim() || !body.deliveryAddress?.city?.trim() || !body.deliveryAddress?.state?.trim() || !/^\d{6}$/.test(body.deliveryAddress?.pincode ?? "") || (body.customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.customerEmail)) || !Array.isArray(body.items) || body.items.length === 0 || body.items.length > 50) {
+      return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Customer name, phone, delivery address, six-digit PIN code and at least one item are required." } });
     }
     const ids = body.items.map((item) => item.productId);
     if (new Set(ids).size !== ids.length || body.items.some((item) => !item.productId || !Number.isSafeInteger(item.quantity) || item.quantity < 1 || item.quantity > 100)) {
@@ -87,10 +88,10 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
       const trackingHash = createHash("sha256").update(trackingToken).digest("hex");
       await client.query(
         `INSERT INTO sales_orders
-          (id, tenant_id, branch_id, channel, status, payment_status, order_number, customer_name, customer_phone,
+          (id, tenant_id, branch_id, channel, status, payment_status, order_number, customer_name, customer_phone, customer_email, shipping_address,
            subtotal, tax_total, grand_total, payment_method, idempotency_key, reservation_expires_at, public_tracking_token_hash)
-         VALUES ($1, $2, $3, 'online', 'pending', 'pending', $4, $5, $6, 0, 0, 0, 'online', $7, now() + interval '15 minutes', $8)`,
-        [orderId, tenantId, branchId, orderNumber, body.customerName.trim(), body.customerPhone.trim(), key, trackingHash],
+         VALUES ($1, $2, $3, 'online', 'pending', 'pending', $4, $5, $6, $7, $8::jsonb, 0, 0, 0, 'online', $9, now() + interval '15 minutes', $10)`,
+        [orderId, tenantId, branchId, orderNumber, body.customerName.trim(), body.customerPhone.trim(), body.customerEmail?.trim() || null, JSON.stringify({ ...body.deliveryAddress, country: body.deliveryAddress.country || "India" }), key, trackingHash],
       );
 
       let subtotal = 0n;
@@ -177,6 +178,7 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
       const orderResult = await client.query(
         `SELECT id, order_number AS "orderNumber", status, payment_status AS "paymentStatus",
                 grand_total::text AS "grandTotal", created_at AS "createdAt",
+                customer_email AS "customerEmail", shipping_address AS "deliveryAddress",
                 reservation_expires_at AS "reservationExpiresAt"
          FROM sales_orders
          WHERE tenant_id = $1 AND id = $2 AND public_tracking_token_hash = $3
