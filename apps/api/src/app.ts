@@ -25,8 +25,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(helmet);
   app.removeContentTypeParser("application/json");
   app.addContentTypeParser("application/json", { parseAs: "buffer" }, (request, body, done) => {
-    (request as FastifyRequest & { rawBody?: Buffer }).rawBody = body;
-    try { done(null, JSON.parse(body.toString("utf8"))); }
+    const rawBody = Buffer.isBuffer(body) ? body : Buffer.from(body);
+    (request as FastifyRequest & { rawBody?: Buffer }).rawBody = rawBody;
+    try { done(null, JSON.parse(rawBody.toString("utf8"))); }
     catch (error) { done(error as Error); }
   });
   await app.register(cors, {
