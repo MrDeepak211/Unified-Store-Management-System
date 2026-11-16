@@ -68,6 +68,12 @@ export default function App() {
   const [returnSaleId, setReturnSaleId] = useState("");
   const [returnProductId, setReturnProductId] = useState("");
   const [returnQuantity, setReturnQuantity] = useState("1");
+  const [newBranchName, setNewBranchName] = useState("");
+  const [newBranchCode, setNewBranchCode] = useState("");
+  const [fromBranchId, setFromBranchId] = useState("");
+  const [toBranchId, setToBranchId] = useState("");
+  const [transferProductId, setTransferProductId] = useState("");
+  const [transferQuantity, setTransferQuantity] = useState("1");
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(null);
   const [storeDisplayName, setStoreDisplayName] = useState("");
   const [storeColor, setStoreColor] = useState("#2563eb");
@@ -150,6 +156,8 @@ export default function App() {
     try {
       const branchData = await api<{ branches: Branch[] }>("/api/v1/business/branches", {}, selectedTenant);
       setBranches(branchData.branches);
+      setFromBranchId((current) => current || activeBranchId);
+      setToBranchId((current) => current || branchData.branches.find((branch) => branch.id !== activeBranchId)?.id || "");
       const chosenBranch = branchData.branches.find((branch) => branch.id === branchId) ?? branchData.branches.find((branch) => branch.isDefault) ?? branchData.branches[0];
       const activeBranchId = chosenBranch?.id ?? "";
       if (activeBranchId && activeBranchId !== branchId) setBranchId(activeBranchId);
@@ -357,7 +365,33 @@ export default function App() {
   }
 
 
-  async function addCategory(event: FormEvent) {
+
+  async function createBranch(event: FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    try {
+      const data = await api<{ branch: Branch }>("/api/v1/business/branches", {
+        method: "POST", body: JSON.stringify({ name: newBranchName, code: newBranchCode }),
+      }, tenantId);
+      setNewBranchName(""); setNewBranchCode("");
+      await loadBusinessData();
+      setToBranchId(data.branch.id);
+      setMessage(`Branch ${data.branch.name} created with zero opening stock.`);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not create branch."); }
+  }
+
+  async function transferStock(event: FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    try {
+      const data = await api<{ transfer: { transferNumber: string } }>("/api/v1/business/inventory/transfers", {
+        method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ fromBranchId, toBranchId, items: [{ productId: transferProductId, quantity: Number(transferQuantity) }] }),
+      }, tenantId);
+      setTransferQuantity("1");
+      await loadBusinessData();
+      setMessage(`Stock transfer ${data.transfer.transferNumber} completed.`);
+    } catch (e) { setError(e instanceof Error ? e.message : "Stock transfer failed."); }
+  }
+\n  async function addCategory(event: FormEvent) {
     event.preventDefault(); setError(""); setMessage("");
     try {
       const data = await api<{ category: { id: string; name: string } }>("/api/v1/business/categories", { method: "POST", body: JSON.stringify({ name: newCategoryName }) }, tenantId);
@@ -495,6 +529,11 @@ export default function App() {
           <p className="muted">Each shop connects its own Razorpay merchant account. Settlements go to that merchant account, not through USMS.</p>
           <form className="inline-form" onSubmit={saveGateway}><label className="store-setting-label">Mode<select value={gatewayMode} onChange={(e)=>setGatewayMode(e.target.value as "test" | "live")}><option value="test">Test mode</option><option value="live">Live mode</option></select></label><label className="store-setting-label">Razorpay Key ID<input value={gatewayKeyId} onChange={(e)=>setGatewayKeyId(e.target.value)} required placeholder="rzp_test_…"/></label><label className="store-setting-label">Razorpay Key Secret<input type="password" value={gatewayKeySecret} onChange={(e)=>setGatewayKeySecret(e.target.value)} required placeholder="Paste merchant key secret"/></label><label className="store-setting-label">Webhook Secret<input type="password" value={gatewayWebhookSecret} onChange={(e)=>setGatewayWebhookSecret(e.target.value)} required placeholder="Webhook secret from Razorpay"/></label><button className="secondary-button">Save payment credentials</button></form>
           <small className="muted">Credentials are encrypted before storage and are never returned to the browser. Use test keys until webhook and payment tests are complete.</small><p className="store-url">Webhook URL: {API_URL}/api/v1/webhooks/razorpay/{activeShop?.slug ?? "your-shop"}</p>
+        </div>
+
+        <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">MULTI-BRANCH</span><h3>Branches & stock transfers</h3></div></div>
+          <form className="inline-form" onSubmit={createBranch}><h4>Add branch</h4><div className="form-grid"><input value={newBranchName} onChange={(e)=>setNewBranchName(e.target.value)} required placeholder="Branch name"/><input value={newBranchCode} onChange={(e)=>setNewBranchCode(e.target.value.toUpperCase())} required maxLength={12} placeholder="Code (e.g. BR02)"/></div><button className="secondary-button">Create branch</button></form>
+          <form className="inline-form" onSubmit={transferStock}><h4>Transfer stock between branches</h4><div className="form-grid"><select value={fromBranchId} onChange={(e)=>setFromBranchId(e.target.value)} required><option value="">From branch</option>{branches.map((b)=><option key={b.id} value={b.id}>{b.name}</option>)}</select><select value={toBranchId} onChange={(e)=>setToBranchId(e.target.value)} required><option value="">To branch</option>{branches.filter((b)=>b.id!==fromBranchId).map((b)=><option key={b.id} value={b.id}>{b.name}</option>)}</select><select value={transferProductId} onChange={(e)=>setTransferProductId(e.target.value)} required><option value="">Product</option>{products.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select><input type="number" min="1" step="1" value={transferQuantity} onChange={(e)=>setTransferQuantity(e.target.value)} required placeholder="Quantity"/></div><button className="secondary-button" disabled={!fromBranchId || !toBranchId || fromBranchId===toBranchId || !transferProductId}>Transfer stock</button></form>
         </div>
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">DAILY SNAPSHOT</span><h3>Business overview</h3></div></div>
           <div className="report-list"><div><span>Today's POS revenue</span><b>₹{Number(overview?.today.posRevenue ?? 0).toFixed(2)}</b></div><div><span>POS sales today</span><b>{overview?.today.posSalesCount ?? 0}</b></div><div><span>Purchase spend today</span><b>₹{Number(overview?.today.purchaseSpend ?? 0).toFixed(2)}</b></div><div><span>Online orders awaiting payment</span><b>{overview?.online.pendingOrders ?? 0}</b></div></div>
