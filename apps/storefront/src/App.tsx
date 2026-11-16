@@ -47,7 +47,13 @@ export default function App() {
     }
   }
 
-  useEffect(() => { void loadStore(); }, [slug]);
+  useEffect(() => {
+    void loadStore();
+    if (!slug) return;
+    const stream = new EventSource(`${API_URL}/api/v1/storefront/${encodeURIComponent(slug)}/events`);
+    stream.onmessage = () => { void loadStore(); };
+    return () => stream.close();
+  }, [slug]);
 
   const cartItems = products.filter((product) => (cart[product.id] ?? 0) > 0);
   const subtotal = cartItems.reduce((sum, product) => sum + Number(product.price) * cart[product.id], 0);
