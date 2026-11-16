@@ -58,7 +58,8 @@ export default function App() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [newCustomerName, setNewCustomerName] = useState("");
-  const [newCustomerPhone, setNewCustomerPhone] = useState("");\n  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [newCustomerPhone, setNewCustomerPhone] = useState("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [newSupplierName, setNewSupplierName] = useState("");
   const [newSupplierPhone, setNewSupplierPhone] = useState("");
   const [purchaseProductId, setPurchaseProductId] = useState("");
