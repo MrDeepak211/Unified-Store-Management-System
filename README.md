@@ -1,64 +1,73 @@
 # Unified Store Management System (USMS)
 
-USMS is a multi-tenant retail SaaS: each shop gets one Business App for physical operations and its own branded online shopping website. Both channels use the same backend and authoritative inventory.
+USMS is a multi-tenant retail platform with **one Business App for the physical shop** and **a separate branded online store for each shop**. Both channels use the same backend and authoritative inventory.
 
-## Product model
+## Product experience
 
-- **Business App:** POS billing, products, stock, purchases, customers, staff and reports.
-- **Individual online storefront:** a separate branded website for each shop (for example, `shop-slug.usms.in`).
-- **Shared platform:** one API and PostgreSQL data platform per environment, with strict tenant and branch isolation.
-- **No shared marketplace in the first release.** Each shop sells through its own storefront.
+- **Business App:** secure sign-in, shop onboarding, product catalogue, stock adjustments and POS sales.
+- **Individual online store:** branded catalogue, live available stock, cart, customer details and 15-minute stock reservation at checkout.
+- **Shared platform:** one Fastify API and PostgreSQL database per environment, with tenant-aware database policies.
+- **No shared marketplace in the first release.** Each shop sells from its own address, such as `shree-mart.usms.in`.
 
 ## Applications
 
 | App | Local URL | Purpose |
 |---|---|---|
-| API | http://localhost:4000 | Shared Fastify API; `/health` and `/api/v1/meta` are available |
-| Storefront | http://localhost:5173 | Customer-facing online store shell |
-| POS | http://localhost:5174 | Physical-store POS shell and local pending-sale queue foundation |
-| Business dashboard | http://localhost:5175 | Owner/manager workspace shell |
+| API | http://localhost:4000 | Shared Fastify API |
+| Business App / POS | http://localhost:5174 | Sign-in, shop setup, catalogue, inventory and counter sales |
+| Storefront | http://localhost:5173 | Customer-facing shop website |
 | Super admin | http://localhost:5176 | Internal SaaS operations shell |
 
-The POS and business dashboard are currently separate development shells. Product direction is to combine them into one coherent Business App experience; they must share backend business rules rather than duplicate them.
+The older dashboard shell remains in the monorepo while the product experience is consolidated into the Business App.
 
-## Run locally
+## Local setup
 
-Requirements: Node.js 22+, Corepack/pnpm, and Docker Desktop or Docker Engine.
+Requirements: Node.js 22+, Corepack/pnpm 9, and Docker Desktop or Docker Engine.
 
-1. Clone this repository.
-2. From the repository root, enable pnpm: `corepack enable`.
-3. Install packages: `pnpm install`.
+1. Clone the repository and run `corepack enable`.
+2. Run `pnpm install`.
+3. Start PostgreSQL and Redis: `docker compose up -d`.
 4. Copy `apps/api/.env.example` to `apps/api/.env`.
-5. Start local infrastructure: `docker compose up -d`.
-6. Start applications: `pnpm dev`.
+5. Set `DATABASE_URL=postgresql://usms:usms_dev_only@localhost:5432/usms`.
+6. Configure Supabase Auth using asymmetric ES256 or RS256 JWT signing keys. Set the real `SUPABASE_JWKS_URL`, `SUPABASE_JWT_ISSUER`, and `SUPABASE_JWT_AUDIENCE` in the API environment.
+7. Set `ORDER_TRACKING_SECRET` to a private random value of at least 32 characters.
+8. Apply SQL migrations: `pnpm db:migrate`.
+9. Copy `apps/pos/.env.example` to `apps/pos/.env`, then set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_API_URL`.
+10. Copy `apps/storefront/.env.example` to `apps/storefront/.env` and set `VITE_API_URL`. For local testing, open the storefront with `?store=your-shop-slug`.
+11. Run `pnpm dev`.
 
-## Monorepo layout
+For local-only use, the Docker Compose PostgreSQL password is deliberately simple. Never reuse it in production.
 
-- `apps/api` — shared Fastify API foundation
-- `apps/storefront` — customer-facing React/Vite storefront
-- `apps/pos` — physical POS React/Vite shell and offline queue foundation
-- `apps/dashboard` — business management UI shell (to be unified with POS)
-- `apps/super-admin` — internal SaaS administration shell
-- `packages/contracts` — shared TypeScript contracts
-- `packages/database` — PostgreSQL schema migrations and database package foundation
-- `docs/` — architecture, tenant isolation, data-integrity and delivery guidance
+## Implemented API slices
 
-## Non-negotiable architecture rules
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/health` | API health |
+| POST | `/api/v1/onboarding/shop` | Create a shop, first branch and owner membership |
+| GET | `/api/v1/me/shops` | List the signed-in user's shops |
+| GET | `/api/v1/business/branches` | List branches in the selected tenant |
+| GET / POST | `/api/v1/business/products` | List and create products |
+| POST | `/api/v1/business/inventory/adjustments` | Audited stock adjustment |
+| POST | `/api/v1/pos/sales` | Transactional POS sale with stock deduction |
+| GET | `/api/v1/storefront/:slug` | Published shop catalogue and available stock |
+| POST | `/api/v1/storefront/:slug/orders` | Reserve online order stock for 15 minutes |
+| GET | `/api/v1/storefront/:slug/orders/:orderId` | Private token-based order status |
 
-- Modular monolith first; no premature microservices.
-- Backend authentication and membership determine tenant access. A tenant ID supplied by a browser is never proof of access.
-- Tenant-owned relationships must be tenant-aware; enable PostgreSQL row-level security and least-privilege roles before production.
-- POS sales and online orders update the same authoritative inventory balance transactionally.
-- Online checkout reserves stock before payment; failed/expired payments release reservations.
-- Inventory movements are auditable and append-only; all mutation endpoints are idempotent.
-- PostgreSQL NUMERIC is used for persisted money, never binary floating-point.
-- Real-time events notify clients after a committed database change; the database remains the source of truth.
-- Offline POS must reconcile safely after reconnect; local stock is not a guarantee of global availability.
+Authenticated business endpoints require a Supabase access token and an `X-USMS-Tenant` header. POS sale and stock adjustment mutations require an `Idempotency-Key` header.
+
+## Shared stock guarantees
+
+- The database is the source of truth; neither client can write stock directly.
+- POS sales decrement `on_hand` only when unreserved stock is sufficient.
+- Online checkout increments `reserved` atomically only when stock is available.
+- Expired online reservations are released by the separate reservation worker: `pnpm --filter @usms/api worker:reservations`.
+- Inventory movements are audited and idempotent.
+- Monetary calculations in the API use integer paise and persisted PostgreSQL NUMERIC values.
 
 ## Current implementation status
 
-This repository is an early foundation, not a completed retail product. The API currently exposes health and metadata endpoints; web apps are UI shells; POS has a local queue helper. An initial PostgreSQL migration now defines tenants, branches, products, shared inventory balances, inventory movements, and POS/online order records.
+Implemented foundation: database migrations for tenants, branches, products, balances, movements, sales/orders, memberships, storefront settings and online reservation fields; JWT verification and tenant membership checks; shop onboarding; product and branch APIs; stock adjustments; transactional POS sales; public storefront catalogue; online stock reservation; private order tracking; reservation expiry worker; Business App login/onboarding/product/stock/POS screens; responsive storefront catalogue/cart/reservation UI; GitHub Actions CI.
 
-Authentication, tenant provisioning, database runtime integration, transactional inventory services, product APIs, GST invoices, checkout/payment integrations, end-to-end synchronization, reporting, and subscription billing still require implementation and automated tests.
+**Not yet production complete:** payment gateway and merchant settlement, online payment confirmation webhook, GST-compliant final invoices/credit notes, purchase receiving and supplier management, returns/refunds, staff invitations and branch permissions, full offline POS reconciliation, subscriptions, super-admin workflows, image uploads, email/SMS notifications, observability, backups and restore drills.
 
-**Do not use this scaffold for live financial or customer data yet.** GST workflows need review by a qualified Indian tax professional. Tenant isolation, payment handling, backups and restore procedures need security testing before launch.
+The storefront currently reserves stock but does not collect payment. Do not use this scaffold for live financial or customer data until the remaining flows, tenant isolation and payment security have been tested. GST workflows require review by a qualified Indian tax professional. Production database runtime credentials must use a non-owner, non-superuser role without BYPASSRLS.
