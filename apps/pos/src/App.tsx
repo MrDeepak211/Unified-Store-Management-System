@@ -19,6 +19,7 @@ type Invoice = { orderId: string; invoiceNumber: string; grandTotal: string; sub
 type InvoiceLine = { productName: string; sku?: string | null; hsnCode?: string | null; unitOfMeasure: string; quantity: number; unitPrice: string; taxRate: string; lineTotal: string };
 type InvoiceDetail = { invoice: Invoice; items: InvoiceLine[]; documentType: string; gstReviewRequired: boolean };
 type StaffMember = { id: string; email: string; role: string; branchIds: string[]; isActive: boolean };
+type OnlineOrder = { id: string; orderNumber: string; status: string; paymentStatus: string; customerName?: string | null; customerPhone?: string | null; grandTotal: string; branchName: string; createdAt: string; items: Array<{ productName: string; quantity: number; lineTotal: string }> };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -91,7 +92,7 @@ export default function App() {
   const [gstin, setGstin] = useState("");
   const [stateCode, setStateCode] = useState("27");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);\n  const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"manager" | "cashier" | "viewer">("cashier");
   const [inviteBranchIds, setInviteBranchIds] = useState<string[]>([]);
@@ -178,7 +179,7 @@ export default function App() {
         api<{ razorpay: GatewaySettings | null }>("/api/v1/business/payments/razorpay", {}, selectedTenant),
         api<{ profile: BusinessProfile }>("/api/v1/business/profile", {}, selectedTenant),
         api<{ invoices: Invoice[] }>("/api/v1/business/invoices", {}, selectedTenant),
-        api<{ categories: Array<{id:string;name:string}> }>("/api/v1/business/categories", {}, selectedTenant),
+        api<{ categories: Array<{id:string;name:string}> }>("/api/v1/business/categories", {}, selectedTenant),\n        api<{ orders: OnlineOrder[] }>("/api/v1/business/online-orders", {}, selectedTenant),
       ]);
       setProducts(productData.products);
       setStockProductId((current) => current || productData.products[0]?.id || "");
@@ -200,7 +201,7 @@ export default function App() {
       setGstin(profileData.profile?.gstin ?? "");
       setStateCode(profileData.profile?.stateCode ?? "27");
       setInvoices(invoiceData.invoices);
-      setCategories(categoryData.categories);
+      setCategories(categoryData.categories);\n      setOnlineOrders(onlineOrderData.orders);
       setPurchaseProductId((current) => current || productData.products[0]?.id || "");
       setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load shop data."); }
@@ -322,7 +323,16 @@ export default function App() {
   }
 
 
-  async function loadStaff() {
+
+  async function updateOnlineOrder(orderId: string, action: "fulfil" | "cancel") {
+    setError(""); setMessage("");
+    try {
+      await api(`/api/v1/business/online-orders/${orderId}/${action}`, { method: "POST" }, tenantId);
+      await loadBusinessData();
+      setMessage(action === "fulfil" ? "Online order marked fulfilled." : "Unpaid online order cancelled and stock released.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not update online order."); }
+  }
+\n  async function loadStaff() {
     try {
       const data = await api<{ staff: StaffMember[] }>("/api/v1/business/staff", {}, tenantId);
       setStaff(data.staff);
@@ -578,6 +588,10 @@ export default function App() {
           <form className="inline-form" onSubmit={inviteStaff}><label className="store-setting-label">Invite by email<input type="email" value={inviteEmail} onChange={(e)=>setInviteEmail(e.target.value)} required placeholder="staff@example.com"/></label><div className="form-grid"><label className="store-setting-label">Role<select value={inviteRole} onChange={(e)=>setInviteRole(e.target.value as "manager" | "cashier" | "viewer")}><option value="cashier">Cashier</option><option value="manager">Manager</option><option value="viewer">Viewer</option></select></label><label className="store-setting-label">Branch access<select multiple value={inviteBranchIds} onChange={(e)=>setInviteBranchIds(Array.from(e.target.selectedOptions).map((o)=>o.value))}>{branches.map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label></div><small className="muted">No branch selection means access to all branches. Staff invitations use your configured Supabase email service.</small><button className="secondary-button">Send staff invitation</button></form>
           <div className="mini-records">{staff.map((member)=><div key={member.id}><b>{member.email ?? "Invited user"}</b><span>{member.role.toUpperCase()} · {member.isActive ? "ACTIVE" : "DISABLED"} <button className="tiny-action" onClick={()=>void toggleStaff(member)}>{member.isActive ? "Disable" : "Enable"}</button></span></div>)}</div>
         </div>}
+
+        <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">ONLINE CHANNEL</span><h3>Online orders</h3></div><span className="muted">{onlineOrders.length} ORDERS</span></div>
+          <div className="mini-records">{onlineOrders.slice(0,12).map((order)=><div key={order.id} className="online-order-row"><div><b>{order.orderNumber}</b><small>{order.customerName ?? "Online customer"} · {order.branchName} · {order.status.toUpperCase()} / {order.paymentStatus.toUpperCase()}</small><small>{order.items.map((item)=>`${item.productName} × ${item.quantity}`).join(", ")}</small></div><div className="online-order-actions"><b>₹{Number(order.grandTotal).toFixed(2)}</b>{order.status==="confirmed" && order.paymentStatus==="paid" && <button className="tiny-action" onClick={()=>void updateOnlineOrder(order.id,"fulfil")}>Mark fulfilled</button>}{order.status==="pending" && order.paymentStatus==="pending" && <button className="tiny-action" onClick={()=>void updateOnlineOrder(order.id,"cancel")}>Cancel & release</button>}</div></div>)}</div>
+        </div>
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">DAILY SNAPSHOT</span><h3>Business overview</h3></div></div>
           <div className="report-list"><div><span>Today's POS revenue</span><b>₹{Number(overview?.today.posRevenue ?? 0).toFixed(2)}</b></div><div><span>POS sales today</span><b>{overview?.today.posSalesCount ?? 0}</b></div><div><span>Purchase spend today</span><b>₹{Number(overview?.today.purchaseSpend ?? 0).toFixed(2)}</b></div><div><span>Online orders awaiting payment</span><b>{overview?.online.pendingOrders ?? 0}</b></div></div>
         </div>
