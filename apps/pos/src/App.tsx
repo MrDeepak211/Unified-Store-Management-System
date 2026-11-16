@@ -166,9 +166,6 @@ export default function App() {
         api<{ invoices: Invoice[] }>("/api/v1/business/invoices", {}, selectedTenant),
         api<{ categories: Array<{id:string;name:string}> }>("/api/v1/business/categories", {}, selectedTenant),
       ]);
-      setBranches(branchData.branches);
-      const chosenBranch = branchData.branches.find((branch) => branch.isDefault) ?? branchData.branches[0];
-      setBranchId(chosenBranch?.id ?? "");
       setProducts(productData.products);
       setStockProductId((current) => current || productData.products[0]?.id || "");
       setCustomers(customerData.customers);
@@ -197,6 +194,13 @@ export default function App() {
   }
 
   useEffect(() => { if (session) void loadShops(); else { setShops([]); setProducts([]); } }, [session]);
+  useEffect(() => {
+    if (!session || !tenantId || !branchId) return;
+    void api<{ products: Product[] }>(`/api/v1/business/products?branchId=${encodeURIComponent(branchId)}`, {}, tenantId)
+      .then((data) => setProducts(data.products))
+      .catch((e) => setError(e instanceof Error ? e.message : "Could not refresh branch stock."));
+  }, [session, tenantId, branchId]);
+
   useEffect(() => {
     if (!session || !tenantId) return;
     const onOnline = () => { void syncPendingQueue(); };
@@ -457,7 +461,7 @@ export default function App() {
   const activeShop = shops.find((shop) => shop.tenantId === tenantId);
   return <main className="business-app">
     <aside className="sidebar"><div className="side-brand"><span className="brand-mark">U</span><span>USMS<small>BUSINESS</small></span></div><div className="side-label">WORKSPACE</div><a className="side-link active" href="#overview">▦ Overview</a><a className="side-link" href="#products">▤ Products & stock</a><a className="side-link" href="#billing">▣ Point of sale</a><div className="side-bottom"><div className="online-indicator"><span/> API CONNECTED WHEN ONLINE</div><button className="side-logout" onClick={() => void supabase?.auth.signOut()}>↪ Sign out</button></div></aside>
-    <section className="main-panel"><header className="business-topbar"><div><span className="eyebrow">BUSINESS WORKSPACE</span><h2>{activeShop?.shopName ?? "Your shop"}</h2></div><div className="topbar-actions"><select value={tenantId} onChange={(e) => setTenantId(e.target.value)}>{shops.map((shop) => <option key={shop.tenantId} value={shop.tenantId}>{shop.shopName}</option>)}</select><span className="user-avatar">{session.user.email?.slice(0,1).toUpperCase()}</span></div></header>
+    <section className="main-panel"><header className="business-topbar"><div><span className="eyebrow">BUSINESS WORKSPACE</span><h2>{activeShop?.shopName ?? "Your shop"}</h2></div><div className="topbar-actions"><select value={tenantId} onChange={(e) => setTenantId(e.target.value)}>{shops.map((shop) => <option key={shop.tenantId} value={shop.tenantId}>{shop.shopName}</option>)}</select><select aria-label="Active branch" value={branchId} onChange={(e)=>setBranchId(e.target.value)}>{branches.map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select><span className="user-avatar">{session.user.email?.slice(0,1).toUpperCase()}</span></div></header>
       {error && <div className="alert error-alert">{error}</div>}{message && <div className="alert success-alert">{message}</div>}
       <section id="overview" className="welcome-row"><div><p className="eyebrow">YOUR BUSINESS, AT A GLANCE</p><h1>Good evening.</h1><p>Everything your physical and online store needs, in one place.</p></div><div className="branch-chip">⌖ {branches.find((b) => b.id === branchId)?.name ?? "Loading branch"}</div></section>
       <section className="metric-grid"><article><span>PRODUCTS</span><strong>{products.length}</strong><small>In your catalogue</small></article><article><span>AVAILABLE STOCK</span><strong>{products.reduce((sum,p) => sum + p.availableStock,0)}</strong><small>Across this shop</small></article><article><span>LOW STOCK</span><strong>{products.filter((p) => p.availableStock > 0 && p.availableStock <= 5).length}</strong><small>5 units or fewer</small></article><article><span>OFFLINE QUEUE</span><strong>{pendingCount ?? "—"}</strong><small>Pending local sales</small></article></section>
