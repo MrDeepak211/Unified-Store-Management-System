@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { requireTenantActor } from "../auth.js";
 import { decryptPaymentSecret, encryptPaymentSecret } from "../paymentCrypto.js";
@@ -139,7 +139,7 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
     const response = await fetch("https://api.razorpay.com/v1/orders", {
       method: "POST",
       headers: { Authorization: basicAuth(keyId!, keySecret!), "Content-Type": "application/json" },
-      body: JSON.stringify({ amount, currency: "INR", receipt: order.orderNumber, notes: { usms_order_id: order.id, usms_tenant_id: tenantId! } }),
+      body: JSON.stringify({ amount, currency: "INR", receipt: `${order.orderNumber}-${randomUUID().slice(0, 6)}`, notes: { usms_order_id: order.id, usms_tenant_id: tenantId! } }),
     });
     const gatewayOrder = await response.json() as { id?: string; amount?: number; currency?: string; status?: string; error?: { description?: string } };
     if (!response.ok || !gatewayOrder.id || gatewayOrder.amount !== amount || gatewayOrder.currency !== "INR") {
