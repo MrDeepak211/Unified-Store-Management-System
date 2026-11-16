@@ -50,8 +50,16 @@ export async function issueSalesInvoice(client: PoolClient, tenantId: string, or
              'gstin', t.gstin, 'stateCode', t.state_code, 'address', t.business_address
            ) FROM tenants t WHERE t.id = $1
          ),
-         invoice_customer_snapshot = jsonb_build_object(
-           'name', o.customer_name, 'phone', o.customer_phone
+         invoice_customer_snapshot = (
+           SELECT jsonb_build_object(
+             'name', COALESCE(c.name, o.customer_name),
+             'phone', COALESCE(c.phone, o.customer_phone),
+             'email', c.email, 'gstin', c.gstin,
+             'stateCode', c.state_code, 'billingAddress', c.billing_address
+           )
+           FROM sales_orders o
+           LEFT JOIN customers c ON c.tenant_id = o.tenant_id AND c.id = o.customer_id
+           WHERE o.tenant_id = $1 AND o.id = $2
          )
      WHERE o.tenant_id = $1 AND o.id = $2 AND o.invoice_number IS NULL
      RETURNING invoice_number AS \"invoiceNumber\", invoice_issued_at AS \"issuedAt\"`,
