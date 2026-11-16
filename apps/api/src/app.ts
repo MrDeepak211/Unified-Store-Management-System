@@ -13,6 +13,7 @@ import { registerReturnsAndReportsRoutes } from "./routes/returnsReports.js";
 import { registerStoreSettingsRoutes } from "./routes/storeSettings.js";
 import { registerPaymentRoutes } from "./routes/payments.js";
 import { registerRazorpayWebhookRoutes } from "./routes/razorpayWebhook.js";
+import { registerProfileAndInvoiceRoutes } from "./routes/profileInvoices.js";
 import { registerSaleRoutes } from "./routes/sales.js";
 import { registerStorefrontRoutes } from "./routes/storefront.js";
 
@@ -53,6 +54,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerStoreSettingsRoutes(app);
   await registerPaymentRoutes(app);
   await registerRazorpayWebhookRoutes(app);
+  await registerProfileAndInvoiceRoutes(app);
   await registerSaleRoutes(app);
   await registerStorefrontRoutes(app);
   await registerInventoryEventRoutes(app);
