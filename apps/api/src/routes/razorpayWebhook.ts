@@ -87,7 +87,7 @@ export async function registerRazorpayWebhookRoutes(app: FastifyInstance) {
              FROM sales_orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE`,
             [tenantId, payment.rows[0].sales_order_id],
           );
-          if (order.rowCount && order.rows[0].status === "pending" && new Date(order.rows[0].reservation_expires_at).getTime() > Date.now()) {
+          if (order.rowCount && order.rows[0].status === "confirmed" && order.rows[0].payment_status === "paid") {\n            // A distinct but repeated captured event must not trigger a second stock deduction or refund.\n          } else if (order.rowCount && order.rows[0].status === "pending" && new Date(order.rows[0].reservation_expires_at).getTime() > Date.now()) {
             const items = await client.query("SELECT product_id, quantity FROM sales_order_items WHERE tenant_id = $1 AND order_id = $2", [tenantId, order.rows[0].id]);
             for (const item of items.rows) {
               const stock = await client.query(
