@@ -24,7 +24,8 @@ export default function App() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [order, setOrder] = useState<OrderResult | null>(null);
-  const [submitting, setSubmitting] = useState(false);\n  const [trackingStatus, setTrackingStatus] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [trackingStatus, setTrackingStatus] = useState("");
 
   async function loadStore() {
     if (!slug) {
@@ -60,7 +61,19 @@ export default function App() {
     });
   }
 
-  async function checkOrder() {\n    if (!order) return;\n    setTrackingStatus("Checking order status…");\n    try {\n      const url = `${API_URL}/api/v1/storefront/${encodeURIComponent(slug)}/orders/${encodeURIComponent(order.order.id)}?token=${encodeURIComponent(order.trackingToken)}`;\n      const response = await fetch(url);\n      const data = await response.json() as { order?: { status: string; paymentStatus: string }; error?: { message?: string } };\n      if (!response.ok || !data.order) throw new Error(data.error?.message ?? "Could not retrieve order status.");\n      setTrackingStatus(`Order status: ${data.order.status} · Payment: ${data.order.paymentStatus}`);\n    } catch (e) { setTrackingStatus(e instanceof Error ? e.message : "Order status unavailable."); }\n  }\n\n  async function checkout(event: FormEvent) {
+  async function checkOrder() {
+    if (!order) return;
+    setTrackingStatus("Checking order status…");
+    try {
+      const url = `${API_URL}/api/v1/storefront/${encodeURIComponent(slug)}/orders/${encodeURIComponent(order.order.id)}?token=${encodeURIComponent(order.trackingToken)}`;
+      const response = await fetch(url);
+      const data = await response.json() as { order?: { status: string; paymentStatus: string }; error?: { message?: string } };
+      if (!response.ok || !data.order) throw new Error(data.error?.message ?? "Could not retrieve order status.");
+      setTrackingStatus(`Order status: ${data.order.status} · Payment: ${data.order.paymentStatus}`);
+    } catch (e) { setTrackingStatus(e instanceof Error ? e.message : "Order status unavailable."); }
+  }
+
+  async function checkout(event: FormEvent) {
     event.preventDefault();
     if (!cartItems.length || !customerName.trim() || !customerPhone.trim()) return;
     setSubmitting(true);
