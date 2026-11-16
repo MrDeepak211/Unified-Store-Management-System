@@ -78,15 +78,20 @@ export async function registerRazorpayWebhookRoutes(app: FastifyInstance) {
       if (eventType === "payment.captured" && paymentEntity?.order_id && paymentEntity.id) {
         const payment = await client.query(
           `SELECT id, sales_order_id, amount_paise, status
-           FROM payments WHERE tenant_id = $1 AND provider = 'razorpay' AND provider_order_id = $2
-           FOR UPDATE`,
+           FROM payments WHERE tenant_id = $1 AND provider = 'razorpay' AND provider_order_id = $2`,
           [tenantId, paymentEntity.order_id],
         );
         if (payment.rowCount && Number(payment.rows[0].amount_paise) === paymentEntity.amount && paymentEntity.currency === "INR") {
+          // Always lock the order before its payment row. The checkout verifier and expiry worker
+          // use the same order-first lock order, avoiding payment/order deadlocks.
           const order = await client.query(
             `SELECT id, branch_id, status, payment_status, reservation_expires_at
              FROM sales_orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE`,
             [tenantId, payment.rows[0].sales_order_id],
+          );
+          await client.query(
+            "SELECT id FROM payments WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
+            [tenantId, payment.rows[0].id],
           );
           if (order.rowCount && order.rows[0].status === "confirmed" && order.rows[0].payment_status === "paid") {
             // A distinct but repeated captured event must not trigger a second stock deduction or refund.
@@ -121,11 +126,13 @@ export async function registerRazorpayWebhookRoutes(app: FastifyInstance) {
         }
       } else if (eventType === "payment.failed" && paymentEntity?.order_id && paymentEntity.id) {
         const payment = await client.query(
-          "SELECT id, sales_order_id FROM payments WHERE tenant_id = $1 AND provider = 'razorpay' AND provider_order_id = $2 FOR UPDATE",
+          "SELECT id, sales_order_id FROM payments WHERE tenant_id = $1 AND provider = 'razorpay' AND provider_order_id = $2",
           [tenantId, paymentEntity.order_id],
         );
         if (payment.rowCount) {
+          // Keep the global lock order consistent with payment verification and expiry.
           const order = await client.query("SELECT id, branch_id, status FROM sales_orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE", [tenantId, payment.rows[0].sales_order_id]);
+          await client.query("SELECT id FROM payments WHERE tenant_id = $1 AND id = $2 FOR UPDATE", [tenantId, payment.rows[0].id]);
           if (order.rowCount && order.rows[0].status === "pending") {
             const items = await client.query("SELECT product_id, quantity FROM sales_order_items WHERE tenant_id = $1 AND order_id = $2", [tenantId, order.rows[0].id]);
             for (const item of items.rows) {
