@@ -54,8 +54,8 @@ export async function issueSalesInvoice(client: PoolClient, tenantId: string, or
            SELECT jsonb_build_object(
              'name', COALESCE(c.name, o.customer_name),
              'phone', COALESCE(c.phone, o.customer_phone),
-             'email', c.email, 'gstin', c.gstin,
-             'stateCode', c.state_code, 'billingAddress', c.billing_address
+             'email', COALESCE(c.email, o.customer_email), 'gstin', c.gstin,
+             'stateCode', c.state_code, 'billingAddress', c.billing_address, 'shippingAddress', o.shipping_address
            )
            FROM sales_orders o
            LEFT JOIN customers c ON c.tenant_id = o.tenant_id AND c.id = o.customer_id
