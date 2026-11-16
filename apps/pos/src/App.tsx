@@ -8,6 +8,10 @@ type Shop = { tenantId: string; shopName: string; slug: string; role: string };
 type Branch = { id: string; name: string; code: string; isDefault: boolean };
 type Product = { id: string; sku: string; name: string; price: string; taxRate: string; availableStock: number; description?: string };
 type CartLine = { productId: string; quantity: number };
+type Party = { id: string; name: string; phone?: string | null };
+type Receipt = { id: string; receiptNumber: string; supplierName?: string | null; grandTotal: string; createdAt: string };
+type Sale = { id: string; orderNumber: string; status: string; channel: string; grandTotal: string; items: Array<{ productId: string; quantity: number }> };
+type Overview = { today: { posSalesCount: number; posRevenue: string; purchaseSpend: string }; inventory: { available: number; low_stock: number }; online: { pendingOrders: number } };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -35,6 +39,22 @@ export default function App() {
   const [newTax, setNewTax] = useState("0");
   const [stockProductId, setStockProductId] = useState("");
   const [stockDelta, setStockDelta] = useState("10");
+  const [customers, setCustomers] = useState<Party[]>([]);
+  const [suppliers, setSuppliers] = useState<Party[]>([]);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [newCustomerPhone, setNewCustomerPhone] = useState("");
+  const [newSupplierName, setNewSupplierName] = useState("");
+  const [newSupplierPhone, setNewSupplierPhone] = useState("");
+  const [purchaseProductId, setPurchaseProductId] = useState("");
+  const [purchaseSupplierId, setPurchaseSupplierId] = useState("");
+  const [purchaseQuantity, setPurchaseQuantity] = useState("1");
+  const [purchaseCost, setPurchaseCost] = useState("");
+  const [returnSaleId, setReturnSaleId] = useState("");
+  const [returnProductId, setReturnProductId] = useState("");
+  const [returnQuantity, setReturnQuantity] = useState("1");
 
   useEffect(() => {
     if (!supabase) { setAuthReady(true); return; }
@@ -74,15 +94,26 @@ export default function App() {
     if (!session || !selectedTenant) return;
     setLoading(true);
     try {
-      const [branchData, productData] = await Promise.all([
+      const [branchData, productData, customerData, supplierData, receiptData, salesData, reportData] = await Promise.all([
         api<{ branches: Branch[] }>("/api/v1/business/branches", {}, selectedTenant),
         api<{ products: Product[] }>("/api/v1/business/products", {}, selectedTenant),
+        api<{ customers: Party[] }>("/api/v1/business/customers", {}, selectedTenant),
+        api<{ suppliers: Party[] }>("/api/v1/business/suppliers", {}, selectedTenant),
+        api<{ receipts: Receipt[] }>("/api/v1/business/purchases/receipts", {}, selectedTenant),
+        api<{ sales: Sale[] }>("/api/v1/business/sales", {}, selectedTenant),
+        api<Overview>("/api/v1/business/reports/overview", {}, selectedTenant),
       ]);
       setBranches(branchData.branches);
       const chosenBranch = branchData.branches.find((branch) => branch.isDefault) ?? branchData.branches[0];
       setBranchId(chosenBranch?.id ?? "");
       setProducts(productData.products);
       setStockProductId((current) => current || productData.products[0]?.id || "");
+      setCustomers(customerData.customers);
+      setSuppliers(supplierData.suppliers);
+      setReceipts(receiptData.receipts);
+      setSales(salesData.sales);
+      setOverview(reportData);
+      setPurchaseProductId((current) => current || productData.products[0]?.id || "");
       setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load shop data."); }
     finally { setLoading(false); }
@@ -173,6 +204,43 @@ export default function App() {
     } catch (e) { setError(e instanceof Error ? e.message : "Stock update failed."); }
   }
 
+
+  async function addCustomer(event: FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    try {
+      await api("/api/v1/business/customers", { method: "POST", body: JSON.stringify({ name: newCustomerName, phone: newCustomerPhone }) }, tenantId);
+      setNewCustomerName(""); setNewCustomerPhone(""); await loadBusinessData(); setMessage("Customer saved.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save customer."); }
+  }
+  async function addSupplier(event: FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    try {
+      await api("/api/v1/business/suppliers", { method: "POST", body: JSON.stringify({ name: newSupplierName, phone: newSupplierPhone }) }, tenantId);
+      setNewSupplierName(""); setNewSupplierPhone(""); await loadBusinessData(); setMessage("Supplier saved.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save supplier."); }
+  }
+  async function receivePurchase(event: FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    try {
+      await api("/api/v1/business/purchases/receipts", {
+        method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ branchId, supplierId: purchaseSupplierId || undefined, items: [{ productId: purchaseProductId, quantity: Number(purchaseQuantity), unitCost: purchaseCost, taxRate: newTax }] }),
+      }, tenantId);
+      setPurchaseQuantity("1"); setPurchaseCost(""); await loadBusinessData(); setMessage("Goods received. Shared stock has been increased.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Goods receipt failed."); }
+  }
+  async function processReturn(event: FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    try {
+      await api(`/api/v1/business/sales/${returnSaleId}/returns`, {
+        method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ items: [{ productId: returnProductId, quantity: Number(returnQuantity) }], restock: true, reason: "Customer return" }),
+      }, tenantId);
+      setReturnSaleId(""); setReturnProductId(""); setReturnQuantity("1"); await loadBusinessData();
+      setMessage("Return recorded and accepted units returned to stock. Refund settlement remains a separate step.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Return could not be processed."); }
+  }
+
   const cartTotal = useMemo(() => cart.reduce((sum, line) => {
     const product = products.find((item) => item.id === line.productId);
     return sum + (product ? Number(product.price) * line.quantity * (1 + Number(product.taxRate) / 100) : 0);
@@ -220,6 +288,25 @@ export default function App() {
         <form className="inline-form stock-form" onSubmit={adjustStock}><h4>Receive / adjust stock</h4><div className="form-grid"><select value={stockProductId} onChange={(e)=>setStockProductId(e.target.value)} required><option value="">Select product</option>{products.map((p)=><option key={p.id} value={p.id}>{p.name} · {p.availableStock} available</option>)}</select><input type="number" step="1" value={stockDelta} onChange={(e)=>setStockDelta(e.target.value)} required placeholder="Quantity change (+/-)"/></div><button className="secondary-button" disabled={!stockProductId}>Update stock</button></form>
       </div>
       <div className="panel-card pos-card" id="billing"><div className="panel-heading"><div><span className="eyebrow">COUNTER BILLING</span><h3>Quick sale</h3></div><span className="live-label">● LIVE STOCK</span></div><div className="pos-products">{products.filter((p)=>p.availableStock>0).slice(0,8).map((product)=><button key={product.id} className="pos-product" onClick={()=>addToCart(product)}><span>{product.name}</span><b>₹{Number(product.price).toFixed(2)}</b><small>{product.availableStock} available · Add +</small></button>)}</div><div className="sale-summary"><h4>Current bill <span>{cart.reduce((n,l)=>n+l.quantity,0)} items</span></h4>{cart.map((line)=>{const product=products.find((p)=>p.id===line.productId);return <div className="bill-line" key={line.productId}><span>{product?.name} × {line.quantity}</span><b>₹{((Number(product?.price??0)*line.quantity)*(1+Number(product?.taxRate??0)/100)).toFixed(2)}</b><button onClick={()=>setCart((current)=>current.filter((x)=>x.productId!==line.productId))}>×</button></div>})}<div className="bill-total"><span>Estimated total</span><strong>₹{cartTotal.toFixed(2)}</strong></div><button className="primary-button" disabled={!cart.length || loading} onClick={()=>void completeSale()}>Complete sale · ₹{cartTotal.toFixed(2)} ↗</button><small>Server verifies final prices and available stock before billing.</small></div></div></section>
+
+      <section className="support-grid">
+        <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">RELATIONSHIPS</span><h3>Customers & suppliers</h3></div></div>
+          <form className="inline-form" onSubmit={addCustomer}><h4>Add customer</h4><div className="form-grid"><input value={newCustomerName} onChange={(e)=>setNewCustomerName(e.target.value)} required placeholder="Customer name"/><input value={newCustomerPhone} onChange={(e)=>setNewCustomerPhone(e.target.value)} placeholder="Mobile number"/></div><button className="secondary-button">Save customer</button></form>
+          <form className="inline-form" onSubmit={addSupplier}><h4>Add supplier</h4><div className="form-grid"><input value={newSupplierName} onChange={(e)=>setNewSupplierName(e.target.value)} required placeholder="Supplier name"/><input value={newSupplierPhone} onChange={(e)=>setNewSupplierPhone(e.target.value)} placeholder="Mobile number"/></div><button className="secondary-button">Save supplier</button></form>
+          <div className="mini-lists"><span>{customers.length} customers</span><span>{suppliers.length} suppliers</span></div>
+        </div>
+        <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">PURCHASING</span><h3>Receive goods</h3></div></div>
+          <form className="inline-form" onSubmit={receivePurchase}><div className="form-grid"><select value={purchaseProductId} onChange={(e)=>setPurchaseProductId(e.target.value)} required><option value="">Product</option>{products.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select><select value={purchaseSupplierId} onChange={(e)=>setPurchaseSupplierId(e.target.value)}><option value="">Supplier (optional)</option>{suppliers.map((s)=><option key={s.id} value={s.id}>{s.name}</option>)}</select><input type="number" min="1" step="1" value={purchaseQuantity} onChange={(e)=>setPurchaseQuantity(e.target.value)} required placeholder="Quantity"/><input type="number" min="0" step="0.01" value={purchaseCost} onChange={(e)=>setPurchaseCost(e.target.value)} required placeholder="Unit cost ₹"/></div><button className="secondary-button" disabled={!purchaseProductId || !branchId}>Save goods receipt</button></form>
+          <div className="mini-records">{receipts.slice(0,4).map((receipt)=><div key={receipt.id}><b>{receipt.receiptNumber}</b><span>{receipt.supplierName ?? "Direct purchase"} · ₹{Number(receipt.grandTotal).toFixed(2)}</span></div>)}</div>
+        </div>
+        <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">RETURNS</span><h3>Process a product return</h3></div></div>
+          <form className="inline-form" onSubmit={processReturn}><select value={returnSaleId} onChange={(e)=>{setReturnSaleId(e.target.value);setReturnProductId("");}} required><option value="">Select completed sale</option>{sales.filter((s)=>["confirmed","fulfilled"].includes(s.status)).map((s)=><option key={s.id} value={s.id}>{s.orderNumber} · ₹{Number(s.grandTotal).toFixed(2)}</option>)}</select><select value={returnProductId} onChange={(e)=>setReturnProductId(e.target.value)} required><option value="">Select returned product</option>{sales.find((s)=>s.id===returnSaleId)?.items.map((item)=><option key={item.productId} value={item.productId}>{products.find((p)=>p.id===item.productId)?.name ?? item.productId} · sold {item.quantity}</option>)}</select><input type="number" min="1" step="1" value={returnQuantity} onChange={(e)=>setReturnQuantity(e.target.value)} required placeholder="Return quantity"/><button className="secondary-button" disabled={!returnSaleId || !returnProductId}>Accept & restock return</button></form>
+          <small className="muted">Accepted units are restocked. Refund processing is not yet connected to a payment provider.</small>
+        </div>
+        <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">DAILY SNAPSHOT</span><h3>Business overview</h3></div></div>
+          <div className="report-list"><div><span>Today's POS revenue</span><b>₹{Number(overview?.today.posRevenue ?? 0).toFixed(2)}</b></div><div><span>POS sales today</span><b>{overview?.today.posSalesCount ?? 0}</b></div><div><span>Purchase spend today</span><b>₹{Number(overview?.today.purchaseSpend ?? 0).toFixed(2)}</b></div><div><span>Online orders awaiting payment</span><b>{overview?.online.pendingOrders ?? 0}</b></div></div>
+        </div>
+      </section>
       <footer className="business-footer"><span>USMS · Unified Store Management System</span><span>Shop ID · {tenantId.slice(0,8)}</span></footer>
     </section>
   </main>;
