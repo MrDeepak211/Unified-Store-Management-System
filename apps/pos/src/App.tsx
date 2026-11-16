@@ -6,7 +6,7 @@ import { listPendingSales } from "./offlineQueue";
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 type Shop = { tenantId: string; shopName: string; slug: string; role: string };
 type Branch = { id: string; name: string; code: string; isDefault: boolean };
-type Product = { id: string; sku: string; name: string; price: string; taxRate: string; availableStock: number; description?: string };
+type Product = { id: string; sku: string; name: string; price: string; taxRate: string; availableStock: number; description?: string; hsnCode?: string | null; unitOfMeasure?: string };
 type CartLine = { productId: string; quantity: number };
 type Party = { id: string; name: string; phone?: string | null };
 type Receipt = { id: string; receiptNumber: string; supplierName?: string | null; grandTotal: string; createdAt: string };
@@ -14,6 +14,8 @@ type Sale = { id: string; orderNumber: string; status: string; channel: string; 
 type Overview = { today: { posSalesCount: number; posRevenue: string; purchaseSpend: string }; inventory: { available: number; low_stock: number }; online: { pendingOrders: number } };
 type StoreSettings = { displayName: string; primaryColor: string; supportEmail?: string | null; supportPhone?: string | null; isPublished: boolean };
 type GatewaySettings = { keyId: string; mode: "test" | "live"; isEnabled: boolean };
+type BusinessProfile = { shopName: string; legalName: string; gstin?: string | null; stateCode?: string | null; address?: Record<string, unknown>; timezone: string };
+type Invoice = { orderId: string; invoiceNumber: string; grandTotal: string; channel: string; status: string; issuedAt: string };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -39,6 +41,8 @@ export default function App() {
   const [newName, setNewName] = useState("");
   const [newPrice, setNewPrice] = useState("");
   const [newTax, setNewTax] = useState("0");
+  const [newHsn, setNewHsn] = useState("");
+  const [newUnit, setNewUnit] = useState("PCS");
   const [stockProductId, setStockProductId] = useState("");
   const [stockDelta, setStockDelta] = useState("10");
   const [customers, setCustomers] = useState<Party[]>([]);
@@ -67,6 +71,11 @@ export default function App() {
   const [gatewayKeySecret, setGatewayKeySecret] = useState("");
   const [gatewayWebhookSecret, setGatewayWebhookSecret] = useState("");
   const [gatewayMode, setGatewayMode] = useState<"test" | "live">("test");
+  const [businessProfile, setBusinessProfile] = useState<BusinessProfile | null>(null);
+  const [legalName, setLegalName] = useState("");
+  const [gstin, setGstin] = useState("");
+  const [stateCode, setStateCode] = useState("27");
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
 
   useEffect(() => {
     if (!supabase) { setAuthReady(true); return; }
@@ -106,7 +115,7 @@ export default function App() {
     if (!session || !selectedTenant) return;
     setLoading(true);
     try {
-      const [branchData, productData, customerData, supplierData, receiptData, salesData, reportData, storeData, gatewayData] = await Promise.all([
+      const [branchData, productData, customerData, supplierData, receiptData, salesData, reportData, storeData, gatewayData, profileData, invoiceData] = await Promise.all([
         api<{ branches: Branch[] }>("/api/v1/business/branches", {}, selectedTenant),
         api<{ products: Product[] }>("/api/v1/business/products", {}, selectedTenant),
         api<{ customers: Party[] }>("/api/v1/business/customers", {}, selectedTenant),
@@ -116,6 +125,8 @@ export default function App() {
         api<Overview>("/api/v1/business/reports/overview", {}, selectedTenant),
         api<{ settings: StoreSettings }>("/api/v1/business/storefront", {}, selectedTenant),
         api<{ razorpay: GatewaySettings | null }>("/api/v1/business/payments/razorpay", {}, selectedTenant),
+        api<{ profile: BusinessProfile }>("/api/v1/business/profile", {}, selectedTenant),
+        api<{ invoices: Invoice[] }>("/api/v1/business/invoices", {}, selectedTenant),
       ]);
       setBranches(branchData.branches);
       const chosenBranch = branchData.branches.find((branch) => branch.isDefault) ?? branchData.branches[0];
@@ -135,6 +146,11 @@ export default function App() {
       setGatewaySettings(gatewayData.razorpay);
       setGatewayKeyId(gatewayData.razorpay?.keyId ?? "");
       setGatewayMode(gatewayData.razorpay?.mode ?? "test");
+      setBusinessProfile(profileData.profile);
+      setLegalName(profileData.profile?.legalName ?? "");
+      setGstin(profileData.profile?.gstin ?? "");
+      setStateCode(profileData.profile?.stateCode ?? "27");
+      setInvoices(invoiceData.invoices);
       setPurchaseProductId((current) => current || productData.products[0]?.id || "");
       setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load shop data."); }
@@ -167,7 +183,9 @@ export default function App() {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const frames = buffer.split("\n\n");
+          const frames = buffer.split("
+
+");
           buffer = frames.pop() ?? "";
           if (frames.some((frame) => frame.startsWith("data: "))) void loadBusinessData(tenantId);
         }
@@ -207,8 +225,8 @@ export default function App() {
   async function addProduct(event: FormEvent) {
     event.preventDefault(); setError(""); setMessage("");
     try {
-      await api("/api/v1/business/products", { method: "POST", body: JSON.stringify({ branchId, sku: newSku, name: newName, price: newPrice, taxRate: newTax }) }, tenantId);
-      setNewSku(""); setNewName(""); setNewPrice(""); setNewTax("0");
+      await api("/api/v1/business/products", { method: "POST", body: JSON.stringify({ branchId, sku: newSku, name: newName, price: newPrice, taxRate: newTax, hsnCode: newHsn, unitOfMeasure: newUnit }) }, tenantId);
+      setNewSku(""); setNewName(""); setNewPrice(""); setNewTax("0"); setNewHsn(""); setNewUnit("PCS");
       await loadBusinessData();
       setMessage("Product added. Now set its opening stock.");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not add product."); }
@@ -228,6 +246,19 @@ export default function App() {
 
 
 
+
+
+  async function saveBusinessProfile(event: FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    try {
+      const data = await api<{ profile: BusinessProfile }>("/api/v1/business/profile", {
+        method: "PUT",
+        body: JSON.stringify({ legalName, gstin, stateCode, timezone: "Asia/Kolkata", address: {} }),
+      }, tenantId);
+      setBusinessProfile(data.profile);
+      setMessage("Business identity saved. New sales invoices will use this issuer snapshot.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save business identity."); }
+  }
 
   async function saveGateway(event: FormEvent) {
     event.preventDefault(); setError(""); setMessage("");
@@ -320,13 +351,13 @@ export default function App() {
     setError(""); setMessage("");
     if (!branchId || !cart.length) return;
     try {
-      const data = await api<{ order: { orderNumber: string; grandTotal: string } }>("/api/v1/pos/sales", {
+      const data = await api<{ order: { orderNumber: string; invoiceNumber: string; grandTotal: string } }>("/api/v1/pos/sales", {
         method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({ branchId, items: cart }),
       }, tenantId);
       setCart([]);
       await loadBusinessData();
-      setMessage(`Sale ${data.order.orderNumber} completed · ₹${data.order.grandTotal}`);
+      setMessage(`Sale ${data.order.orderNumber} · Invoice ${data.order.invoiceNumber} · ₹${data.order.grandTotal}`);
     } catch (e) { setError(e instanceof Error ? e.message : "Sale could not be completed."); }
   }
 
@@ -378,6 +409,15 @@ export default function App() {
         </div>
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">DAILY SNAPSHOT</span><h3>Business overview</h3></div></div>
           <div className="report-list"><div><span>Today's POS revenue</span><b>₹{Number(overview?.today.posRevenue ?? 0).toFixed(2)}</b></div><div><span>POS sales today</span><b>{overview?.today.posSalesCount ?? 0}</b></div><div><span>Purchase spend today</span><b>₹{Number(overview?.today.purchaseSpend ?? 0).toFixed(2)}</b></div><div><span>Online orders awaiting payment</span><b>{overview?.online.pendingOrders ?? 0}</b></div></div>
+        </div>
+      </section>
+
+      <section className="support-grid">
+        <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">LEGAL DETAILS</span><h3>Business identity for invoices</h3></div></div>
+          <form className="inline-form" onSubmit={saveBusinessProfile}><label className="store-setting-label">Legal business name<input value={legalName} onChange={(e)=>setLegalName(e.target.value)} required placeholder="Legal name on invoice"/></label><div className="form-grid"><label className="store-setting-label">GSTIN (if registered)<input value={gstin} onChange={(e)=>setGstin(e.target.value.toUpperCase())} maxLength={15} placeholder="15-character GSTIN"/></label><label className="store-setting-label">State code<input value={stateCode} onChange={(e)=>setStateCode(e.target.value)} maxLength={2} required placeholder="27"/></label></div><button className="secondary-button">Save business identity</button></form><small className="muted">Invoice numbering is enabled. GST invoice format and tax split need professional review before production use.</small>
+        </div>
+        <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">SALES DOCUMENTS</span><h3>Recent invoices</h3></div><span className="muted">{invoices.length} ISSUED</span></div>
+          <div className="mini-records">{invoices.slice(0,8).map((invoice)=><div key={invoice.orderId}><b>{invoice.invoiceNumber}</b><span>{invoice.channel.toUpperCase()} · ₹{Number(invoice.grandTotal).toFixed(2)}</span></div>)}</div>
         </div>
       </section>
       <footer className="business-footer"><span>USMS · Unified Store Management System</span><span>Shop ID · {tenantId.slice(0,8)}</span></footer>
