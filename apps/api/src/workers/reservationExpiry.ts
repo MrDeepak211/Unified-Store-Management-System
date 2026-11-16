@@ -1,4 +1,5 @@
 import { closePool, getPool, withTenantTransaction } from "../db.js";
+import { notifyInventoryChanged } from "../routes/inventoryEvents.js";
 
 async function releaseExpiredReservations() {
   const tenants = await getPool().query("SELECT id FROM tenants WHERE status = 'active'");
@@ -48,6 +49,7 @@ async function releaseExpiredReservations() {
             [tenant.id, order.id, item.product_id, item.quantity, `expire:${order.id}:${item.product_id}`],
           );
         }
+        await notifyInventoryChanged(client, { tenantId: tenant.id as string, branchId: (await client.query("SELECT branch_id FROM sales_orders WHERE tenant_id = $1 AND id = $2", [tenant.id, order.id])).rows[0].branch_id as string, productIds: items.rows.map((item) => item.product_id as string) });
         count += 1;
       }
       return count;
