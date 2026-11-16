@@ -11,7 +11,8 @@ type CartLine = { productId: string; quantity: number };
 type Party = { id: string; name: string; phone?: string | null };
 type Receipt = { id: string; receiptNumber: string; supplierName?: string | null; grandTotal: string; createdAt: string };
 type Sale = { id: string; orderNumber: string; status: string; channel: string; grandTotal: string; items: Array<{ productId: string; quantity: number }> };
-type Overview = { today: { posSalesCount: number; posRevenue: string; purchaseSpend: string }; inventory: { available: number; low_stock: number }; online: { pendingOrders: number } };
+type Overview = { today: { posSalesCount: number; posRevenue: string; purchaseSpend: string; expenseSpend: string; cashIn: string; cashOut: string; netCash: string }; inventory: { available: number; low_stock: number }; online: { pendingOrders: number } };
+type Expense = { id: string; category: string; description: string; amount: string; paymentMethod: string; expenseDate: string };
 type StoreSettings = { displayName: string; primaryColor: string; supportEmail?: string | null; supportPhone?: string | null; isPublished: boolean };
 type GatewaySettings = { keyId: string; mode: "test" | "live"; isEnabled: boolean };
 type BusinessProfile = { shopName: string; legalName: string; gstin?: string | null; stateCode?: string | null; address?: Record<string, unknown>; timezone: string };
@@ -95,6 +96,11 @@ export default function App() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expenseCategory, setExpenseCategory] = useState("");
+  const [expenseDescription, setExpenseDescription] = useState("");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseMethod, setExpenseMethod] = useState<"cash" | "upi" | "card" | "bank_transfer">("cash");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"manager" | "cashier" | "viewer">("cashier");
   const [inviteBranchIds, setInviteBranchIds] = useState<string[]>([]);
@@ -183,6 +189,7 @@ export default function App() {
         api<{ invoices: Invoice[] }>("/api/v1/business/invoices", {}, selectedTenant),
         api<{ categories: Array<{id:string;name:string}> }>("/api/v1/business/categories", {}, selectedTenant),
         api<{ orders: OnlineOrder[] }>("/api/v1/business/online-orders", {}, selectedTenant),
+        api<{ expenses: Expense[] }>("/api/v1/business/expenses", {}, selectedTenant),
       ]);
       setProducts(productData.products);
       setStockProductId((current) => current || productData.products[0]?.id || "");
@@ -206,6 +213,7 @@ export default function App() {
       setInvoices(invoiceData.invoices);
       setCategories(categoryData.categories);
       setOnlineOrders(onlineOrderData.orders);
+      setExpenses(expenseData.expenses);
       setPurchaseProductId((current) => current || productData.products[0]?.id || "");
       setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load shop data."); }
@@ -253,7 +261,9 @@ export default function App() {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const frames = buffer.split("\n\n");
+          const frames = buffer.split("
+
+");
           buffer = frames.pop() ?? "";
           if (frames.some((frame) => frame.startsWith("data: "))) void loadBusinessData(tenantId);
         }
@@ -327,6 +337,19 @@ export default function App() {
   }
 
 
+
+
+  async function addExpense(event: FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    try {
+      await api("/api/v1/business/expenses", {
+        method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ branchId, category: expenseCategory, description: expenseDescription, amount: expenseAmount, paymentMethod: expenseMethod }),
+      }, tenantId);
+      setExpenseCategory(""); setExpenseDescription(""); setExpenseAmount("");
+      await loadBusinessData(); setMessage("Expense recorded in the branch cashbook.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not record expense."); }
+  }
 
   async function updateOnlineOrder(orderId: string, action: "fulfil" | "cancel") {
     setError(""); setMessage("");
@@ -600,6 +623,12 @@ export default function App() {
 
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">ONLINE CHANNEL</span><h3>Online orders</h3></div><span className="muted">{onlineOrders.length} ORDERS</span></div>
           <div className="mini-records">{onlineOrders.slice(0,12).map((order)=><div key={order.id} className="online-order-row"><div><b>{order.orderNumber}</b><small>{order.customerName ?? "Online customer"} · {order.branchName} · {order.status.toUpperCase()} / {order.paymentStatus.toUpperCase()}</small><small>{order.items.map((item)=>`${item.productName} × ${item.quantity}`).join(", ")}</small></div><div className="online-order-actions"><b>₹{Number(order.grandTotal).toFixed(2)}</b>{order.status==="confirmed" && order.paymentStatus==="paid" && <button className="tiny-action" onClick={()=>void updateOnlineOrder(order.id,"fulfil")}>Mark fulfilled</button>}{order.status==="pending" && order.paymentStatus==="pending" && <button className="tiny-action" onClick={()=>void updateOnlineOrder(order.id,"cancel")}>Cancel & release</button>}</div></div>)}</div>
+        </div>
+
+        <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">EXPENSES & CASHBOOK</span><h3>Record business expense</h3></div></div>
+          <form className="inline-form" onSubmit={addExpense}><div className="form-grid"><input value={expenseCategory} onChange={(e)=>setExpenseCategory(e.target.value)} required placeholder="Category (rent, travel…)"/><input value={expenseDescription} onChange={(e)=>setExpenseDescription(e.target.value)} required placeholder="Description"/><input type="number" min="0.01" step="0.01" value={expenseAmount} onChange={(e)=>setExpenseAmount(e.target.value)} required placeholder="Amount ₹"/><select value={expenseMethod} onChange={(e)=>setExpenseMethod(e.target.value as typeof expenseMethod)}><option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option><option value="bank_transfer">Bank transfer</option></select></div><button className="secondary-button" disabled={!branchId}>Record expense</button></form>
+          <div className="report-list"><div><span>Cash received today</span><b>₹{Number(overview?.today.cashIn ?? 0).toFixed(2)}</b></div><div><span>Cash expenses today</span><b>₹{Number(overview?.today.cashOut ?? 0).toFixed(2)}</b></div><div><span>Net cash movement</span><b>₹{Number(overview?.today.netCash ?? 0).toFixed(2)}</b></div></div>
+          <div className="mini-records">{expenses.slice(0,4).map((expense)=><div key={expense.id}><b>{expense.category}</b><span>{expense.description} · ₹{Number(expense.amount).toFixed(2)} · {expense.paymentMethod.toUpperCase()}</span></div>)}</div>
         </div>
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">DAILY SNAPSHOT</span><h3>Business overview</h3></div></div>
           <div className="report-list"><div><span>Today's POS revenue</span><b>₹{Number(overview?.today.posRevenue ?? 0).toFixed(2)}</b></div><div><span>POS sales today</span><b>{overview?.today.posSalesCount ?? 0}</b></div><div><span>Purchase spend today</span><b>₹{Number(overview?.today.purchaseSpend ?? 0).toFixed(2)}</b></div><div><span>Online orders awaiting payment</span><b>{overview?.online.pendingOrders ?? 0}</b></div></div>
