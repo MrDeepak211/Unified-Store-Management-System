@@ -130,7 +130,7 @@ export async function registerOnlineOrderManagementRoutes(app: FastifyInstance) 
       return reply.code(502).send({ error: { code: "REFUND_REQUEST_FAILED", message: "Payment provider could not accept the refund request." } });
     }
     await withTenantTransaction(actor.tenantId, async (client) => {
-      await client.query("UPDATE payments SET status = 'refund_pending', updated_at = now() WHERE tenant_id = $1 AND id = $2", [actor.tenantId, details.paymentId]);
+      await client.query("UPDATE payments SET status = 'refund_pending', updated_at = now() WHERE tenant_id = $1 AND id = $2 AND status <> 'refunded'", [actor.tenantId, details.paymentId]);
     });
     return { refund: { provider: "razorpay", refundId: refund.id, status: refund.status ?? "pending" }, message: "Refund request accepted by the payment provider. Final status will update from the signed webhook." };
   });
