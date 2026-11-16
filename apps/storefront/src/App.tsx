@@ -24,6 +24,12 @@ export default function App() {
   const [error, setError] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [addressLine1, setAddressLine1] = useState("");
+  const [addressLine2, setAddressLine2] = useState("");
+  const [addressCity, setAddressCity] = useState("");
+  const [addressState, setAddressState] = useState("");
+  const [addressPincode, setAddressPincode] = useState("");
   const [order, setOrder] = useState<OrderResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [trackingStatus, setTrackingStatus] = useState("");
@@ -133,7 +139,7 @@ export default function App() {
 
   async function checkout(event: FormEvent) {
     event.preventDefault();
-    if (!cartItems.length || !customerName.trim() || !customerPhone.trim()) return;
+    if (!cartItems.length || !customerName.trim() || !customerPhone.trim() || !addressLine1.trim() || !addressCity.trim() || !addressState.trim() || !/^\\d{6}$/.test(addressPincode)) return;
     setSubmitting(true);
     setError("");
     try {
@@ -186,7 +192,12 @@ export default function App() {
         {cartItems.length ? cartItems.map((product) => <div className="cart-line" key={product.id}><span>{product.name} × {cart[product.id]}</span><b>₹{(Number(product.price) * cart[product.id]).toFixed(2)}</b></div>) : <p className="empty-cart">Your bag is waiting for something good.</p>}
         <label>Your name<input value={customerName} onChange={(e) => setCustomerName(e.target.value)} required placeholder="Full name"/></label>
         <label>Mobile number<input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} required inputMode="tel" placeholder="10-digit mobile number"/></label>
-        <button className="checkout-button" disabled={!cartItems.length || submitting}>{submitting ? "Reserving stock…" : "Reserve order · ₹" + total.toFixed(2)}</button>
+        <label>Email address<input type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="Optional"/></label>
+        <label>Address line 1<input value={addressLine1} onChange={(e)=>setAddressLine1(e.target.value)} required placeholder="House / shop / street"/></label>
+        <label>Address line 2<input value={addressLine2} onChange={(e)=>setAddressLine2(e.target.value)} placeholder="Area / landmark (optional)"/></label>
+        <div className="delivery-grid"><label>City<input value={addressCity} onChange={(e)=>setAddressCity(e.target.value)} required placeholder="City"/></label><label>State<input value={addressState} onChange={(e)=>setAddressState(e.target.value)} required placeholder="State"/></label><label>PIN code<input value={addressPincode} onChange={(e)=>setAddressPincode(e.target.value.replace(/\\D/g,"").slice(0,6))} required inputMode="numeric" maxLength={6} placeholder="6 digits"/></label></div>
+
+        <button className="checkout-button" disabled={!cartItems.length || submitting || !addressLine1.trim() || !addressCity.trim() || !addressState.trim() || !/^\\d{6}$/.test(addressPincode)}>{submitting ? "Reserving stock…" : "Reserve order · ₹" + total.toFixed(2)}</button>
         <small>Secure stock reservation · Payments go to this shop's own Razorpay account</small>
       </form>
     </section>
