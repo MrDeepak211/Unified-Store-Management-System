@@ -116,8 +116,8 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
         subtotal += lineCents;
         taxTotal += lineTax;
         await client.query(
-          `INSERT INTO sales_order_items (tenant_id, order_id, product_id, quantity, unit_price, tax_rate, line_total)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          `INSERT INTO sales_order_items (tenant_id, order_id, product_id, quantity, unit_price, tax_rate, line_total, product_name_snapshot, sku_snapshot, hsn_code_snapshot, unit_of_measure_snapshot)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
           [tenantId, orderId, item.productId, item.quantity, product.price, product.tax_rate, money(lineCents), product.name, product.sku, product.hsn_code, product.unit_of_measure],
         );
         await client.query(
