@@ -47,7 +47,7 @@ export async function registerProductRoutes(app: FastifyInstance) {
          WHERE p.tenant_id = $1
          GROUP BY p.id
          ORDER BY p.name ASC`,
-        [actor.tenantId],
+        [actor.tenantId, request.query.branchId ?? null],
       );
       return { products: result.rows };
     });
