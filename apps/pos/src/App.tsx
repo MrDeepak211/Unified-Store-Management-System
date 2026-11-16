@@ -18,6 +18,7 @@ type BusinessProfile = { shopName: string; legalName: string; gstin?: string | n
 type Invoice = { orderId: string; invoiceNumber: string; grandTotal: string; subtotal?: string; taxTotal?: string; channel: string; status: string; issuedAt: string; issuer?: Record<string, unknown>; customer?: Record<string, unknown> };
 type InvoiceLine = { productName: string; sku?: string | null; hsnCode?: string | null; unitOfMeasure: string; quantity: number; unitPrice: string; taxRate: string; lineTotal: string };
 type InvoiceDetail = { invoice: Invoice; items: InvoiceLine[]; documentType: string; gstReviewRequired: boolean };
+type StaffMember = { id: string; email: string; role: string; branchIds: string[]; isActive: boolean };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -90,6 +91,10 @@ export default function App() {
   const [gstin, setGstin] = useState("");
   const [stateCode, setStateCode] = useState("27");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"manager" | "cashier" | "viewer">("cashier");
+  const [inviteBranchIds, setInviteBranchIds] = useState<string[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetail | null>(null);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
 
@@ -203,6 +208,7 @@ export default function App() {
   }
 
   useEffect(() => { if (session) void loadShops(); else { setShops([]); setProducts([]); } }, [session]);
+  useEffect(() => { if (session && tenantId) void loadStaff(); }, [session, tenantId]);
   useEffect(() => {
     if (!session || !tenantId || !branchId) return;
     void api<{ products: Product[] }>(`/api/v1/business/products?branchId=${encodeURIComponent(branchId)}`, {}, tenantId)
@@ -313,6 +319,36 @@ export default function App() {
       setSelectedInvoice(data);
     } catch (e) { setError(e instanceof Error ? e.message : "Could not open invoice."); }
     finally { setInvoiceLoading(false); }
+  }
+
+
+  async function loadStaff() {
+    try {
+      const data = await api<{ staff: StaffMember[] }>("/api/v1/business/staff", {}, tenantId);
+      setStaff(data.staff);
+    } catch {
+      setStaff([]);
+    }
+  }
+  async function inviteStaff(event: FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    try {
+      const data = await api<{ staff: StaffMember }>("/api/v1/business/staff/invite", {
+        method: "POST",
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole, branchIds: inviteBranchIds }),
+      }, tenantId);
+      setStaff((current) => [data.staff, ...current.filter((member) => member.id !== data.staff.id)]);
+      setInviteEmail("");
+      setMessage("Staff invitation sent. They must accept the Supabase invitation before signing in.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Staff invitation failed."); }
+  }
+  async function toggleStaff(member: StaffMember) {
+    try {
+      const data = await api<{ staff: StaffMember }>(`/api/v1/business/staff/${member.id}`, {
+        method: "PATCH", body: JSON.stringify({ isActive: !member.isActive }),
+      }, tenantId);
+      setStaff((current) => current.map((row) => row.id === member.id ? data.staff : row));
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not update staff access."); }
   }
 
   async function saveBusinessProfile(event: FormEvent) {
@@ -536,6 +572,11 @@ export default function App() {
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">MULTI-BRANCH</span><h3>Branches & stock transfers</h3></div></div>
           <form className="inline-form" onSubmit={createBranch}><h4>Add branch</h4><div className="form-grid"><input value={newBranchName} onChange={(e)=>setNewBranchName(e.target.value)} required placeholder="Branch name"/><input value={newBranchCode} onChange={(e)=>setNewBranchCode(e.target.value.toUpperCase())} required maxLength={12} placeholder="Code (e.g. BR02)"/></div><button className="secondary-button">Create branch</button></form>
           <form className="inline-form" onSubmit={transferStock}><h4>Transfer stock between branches</h4><div className="form-grid"><select value={fromBranchId} onChange={(e)=>setFromBranchId(e.target.value)} required><option value="">From branch</option>{branches.map((b)=><option key={b.id} value={b.id}>{b.name}</option>)}</select><select value={toBranchId} onChange={(e)=>setToBranchId(e.target.value)} required><option value="">To branch</option>{branches.filter((b)=>b.id!==fromBranchId).map((b)=><option key={b.id} value={b.id}>{b.name}</option>)}</select><select value={transferProductId} onChange={(e)=>setTransferProductId(e.target.value)} required><option value="">Product</option>{products.map((p)=><option key={p.id} value={p.id}>{p.name}</option>)}</select><input type="number" min="1" step="1" value={transferQuantity} onChange={(e)=>setTransferQuantity(e.target.value)} required placeholder="Quantity"/></div><button className="secondary-button" disabled={!fromBranchId || !toBranchId || fromBranchId===toBranchId || !transferProductId}>Transfer stock</button></form>
+        </div>
+
+        <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">TEAM ACCESS</span><h3>Staff & permissions</h3></div><span className="muted">{staff.length} MEMBERS</span></div>
+          <form className="inline-form" onSubmit={inviteStaff}><label className="store-setting-label">Invite by email<input type="email" value={inviteEmail} onChange={(e)=>setInviteEmail(e.target.value)} required placeholder="staff@example.com"/></label><div className="form-grid"><label className="store-setting-label">Role<select value={inviteRole} onChange={(e)=>setInviteRole(e.target.value as "manager" | "cashier" | "viewer")}><option value="cashier">Cashier</option><option value="manager">Manager</option><option value="viewer">Viewer</option></select></label><label className="store-setting-label">Branch access<select multiple value={inviteBranchIds} onChange={(e)=>setInviteBranchIds(Array.from(e.target.selectedOptions).map((o)=>o.value))}>{branches.map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label></div><small className="muted">No branch selection means access to all branches. Staff invitations use your configured Supabase email service.</small><button className="secondary-button">Send staff invitation</button></form>
+          <div className="mini-records">{staff.map((member)=><div key={member.id}><b>{member.email ?? "Invited user"}</b><span>{member.role.toUpperCase()} · {member.isActive ? "ACTIVE" : "DISABLED"} <button className="tiny-action" onClick={()=>void toggleStaff(member)}>{member.isActive ? "Disable" : "Enable"}</button></span></div>)}</div>
         </div>
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">DAILY SNAPSHOT</span><h3>Business overview</h3></div></div>
           <div className="report-list"><div><span>Today's POS revenue</span><b>₹{Number(overview?.today.posRevenue ?? 0).toFixed(2)}</b></div><div><span>POS sales today</span><b>{overview?.today.posSalesCount ?? 0}</b></div><div><span>Purchase spend today</span><b>₹{Number(overview?.today.purchaseSpend ?? 0).toFixed(2)}</b></div><div><span>Online orders awaiting payment</span><b>{overview?.online.pendingOrders ?? 0}</b></div></div>
