@@ -25,7 +25,7 @@ Public storefront routes resolve a tenant by its unique shop slug and set transa
 
 POS sale and stock adjustment endpoints require an `Idempotency-Key` header. The API serializes duplicate idempotency keys per tenant, validates all product and branch references inside the transaction, computes totals server-side, and rolls back the entire sale if any item cannot be fulfilled.
 
-Online checkout reserves stock for 15 minutes. Payment is not yet integrated; the reservation expiry worker releases stock for expired pending orders. The customer-facing tracking token is HMAC-derived using the server-only `ORDER_TRACKING_SECRET`; only its hash is stored.
+Online checkout reserves stock for 15 minutes. Each shop may connect its own Razorpay account; the API encrypts merchant secrets, verifies Checkout signatures and signed webhook events, and commits reserved stock only after payment capture. The reservation expiry worker releases stock for expired pending orders. The customer-facing tracking token is HMAC-derived using the server-only `ORDER_TRACKING_SECRET`; only its hash is stored.
 
 ## Error envelope
 
