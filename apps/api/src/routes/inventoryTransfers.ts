@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { requireTenantActor } from "../auth.js";
+import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
 import { notifyInventoryChanged } from "./inventoryEvents.js";
 
@@ -30,6 +30,8 @@ export async function registerInventoryTransferRoutes(app: FastifyInstance) {
           [actor.tenantId, key],
         );
         if (prior.rowCount) return { transfer: prior.rows[0], replayed: true };
+        assertBranchAccess(actor, body.fromBranchId!);
+        assertBranchAccess(actor, body.toBranchId!);
         const branches = await client.query(
           "SELECT id FROM branches WHERE tenant_id = $1 AND id = ANY($2::uuid[])",
           [actor.tenantId, [body.fromBranchId, body.toBranchId]],
