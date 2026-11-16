@@ -49,6 +49,7 @@ export async function registerSaleRoutes(app: FastifyInstance) {
 
     try {
       const result = await withTenantTransaction(actor.tenantId, async (client) => {
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
         const prior = await client.query(
           "SELECT id, order_number AS \"orderNumber\", status, grand_total::text AS \"grandTotal\" FROM sales_orders WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1",
           [actor.tenantId, key],
