@@ -207,14 +207,12 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
         await client.query("ROLLBACK");
         return reply.code(400).send({ error: { code: "PAYMENT_ORDER_MISMATCH", message: "Payment order does not match this USMS order." } });
       }
-      const expected = createHash("sha256").update(body.razorpayOrderId + "|" + body.razorpayPaymentId).digest("hex");
       // HMAC-SHA256 is the documented Razorpay Checkout signature construction.
       const signature = createHmac("sha256", keySecret).update(body.razorpayOrderId + "|" + body.razorpayPaymentId).digest("hex");
       if (!safeEqualHex(signature, body.razorpaySignature)) {
         await client.query("ROLLBACK");
         return reply.code(400).send({ error: { code: "INVALID_PAYMENT_SIGNATURE", message: "Payment signature verification failed." } });
       }
-      void expected;
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -240,6 +238,12 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
         body: JSON.stringify({ amount: providerPayment.amount, currency: "INR" }),
       });
       if (!capture.ok) return reply.code(409).send({ error: { code: "PAYMENT_CAPTURE_PENDING", message: "Payment is authorised but capture is not yet confirmed. Check order status shortly." } });
+      const refreshed = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(body.razorpayPaymentId)}`, { headers: { Authorization: auth } });
+      const refreshedPayment = await refreshed.json() as { status?: string; order_id?: string; amount?: number; currency?: string };
+      if (!refreshed.ok || refreshedPayment.status !== "captured" || refreshedPayment.order_id !== body.razorpayOrderId ||
+          refreshedPayment.amount !== providerPayment.amount || refreshedPayment.currency !== "INR") {
+        return reply.code(409).send({ error: { code: "PAYMENT_CAPTURE_PENDING", message: "Payment capture has not yet been confirmed by the provider." } });
+      }
     }
 
     const finalized = await withTenantTransaction(tenantId!, async (db) => {
