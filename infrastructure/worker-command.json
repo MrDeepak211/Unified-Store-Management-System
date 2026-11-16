@@ -1,4 +1,0 @@
-{
-  "extends": "./Dockerfile.api",
-  "command": ["node", "apps/api/dist/workers/reservationExpiry.js"]
-}
