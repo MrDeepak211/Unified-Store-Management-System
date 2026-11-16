@@ -188,7 +188,12 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
         return reply.code(404).send({ error: { code: "ORDER_NOT_FOUND", message: "Order not found." } });
       }
       const items = await client.query(
-        `SELECT p.name, i.quantity, i.unit_price::text AS "unitPrice", i.line_total::text AS "lineTotal"
+        `SELECT COALESCE(i.product_name_snapshot, p.name) AS name,
+                COALESCE(i.sku_snapshot, p.sku) AS sku,
+                i.quantity, i.unit_price::text AS "unitPrice",
+                i.line_total::text AS "lineTotal",
+                i.hsn_code_snapshot AS "hsnCode",
+                i.unit_of_measure_snapshot AS "unitOfMeasure"
          FROM sales_order_items i
          JOIN products p ON p.tenant_id = i.tenant_id AND p.id = i.product_id
          WHERE i.tenant_id = $1 AND i.order_id = $2`,
