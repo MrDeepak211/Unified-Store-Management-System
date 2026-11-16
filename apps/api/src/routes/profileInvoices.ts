@@ -59,8 +59,9 @@ export async function registerProfileAndInvoiceRoutes(app: FastifyInstance) {
                 subtotal::text, tax_total::text AS "taxTotal", grand_total::text AS "grandTotal",
                 channel, status
          FROM sales_orders WHERE tenant_id = $1 AND invoice_number IS NOT NULL
+           AND ($2::uuid[] IS NULL OR branch_id = ANY($2))
          ORDER BY invoice_issued_at DESC LIMIT 200`,
-        [actor.tenantId],
+        [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
       );
       return { invoices: result.rows };
     });
@@ -74,8 +75,9 @@ export async function registerProfileAndInvoiceRoutes(app: FastifyInstance) {
                 invoice_issuer_snapshot AS issuer, invoice_customer_snapshot AS customer,
                 subtotal::text, tax_total::text AS "taxTotal", grand_total::text AS "grandTotal",
                 channel, status
-         FROM sales_orders WHERE tenant_id = $1 AND id = $2 AND invoice_number IS NOT NULL LIMIT 1`,
-        [actor.tenantId, request.params.orderId],
+         FROM sales_orders WHERE tenant_id = $1 AND id = $2 AND invoice_number IS NOT NULL
+           AND ($3::uuid[] IS NULL OR branch_id = ANY($3)) LIMIT 1`,
+        [actor.tenantId, request.params.orderId, actor.branchIds.length ? actor.branchIds : null],
       );
       if (!invoice.rowCount) return reply.code(404).send({ error: { code: "INVOICE_NOT_FOUND", message: "Invoice not found." } });
       const items = await client.query(
