@@ -18,6 +18,8 @@ CREATE TABLE sales_returns (
   FOREIGN KEY (tenant_id, sales_order_id) REFERENCES sales_orders(tenant_id, id) ON DELETE RESTRICT
 );
 
+ALTER TABLE sales_order_items ADD CONSTRAINT sales_order_items_tenant_id_unique UNIQUE (tenant_id, id);
+
 CREATE TABLE sales_return_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL,
