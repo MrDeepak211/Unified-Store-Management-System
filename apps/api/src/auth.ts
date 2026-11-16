@@ -18,7 +18,7 @@ function getJwks() {
   return jwks;
 }
 
-async function verifyAccessToken(token: string): Promise<JWTPayload> {
+export async function verifyAccessToken(token: string): Promise<JWTPayload> {
   const issuer = process.env.SUPABASE_JWT_ISSUER;
   if (!issuer) throw new Error("SUPABASE_JWT_ISSUER is not configured.");
   const { payload } = await jwtVerify(token, getJwks(), {
