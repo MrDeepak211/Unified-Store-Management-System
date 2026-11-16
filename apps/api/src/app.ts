@@ -10,6 +10,7 @@ import { registerBranchRoutes } from "./routes/branches.js";
 import { registerInventoryEventRoutes } from "./routes/inventoryEvents.js";
 import { registerPartyAndPurchaseRoutes } from "./routes/partiesPurchases.js";
 import { registerReturnsAndReportsRoutes } from "./routes/returnsReports.js";
+import { registerStoreSettingsRoutes } from "./routes/storeSettings.js";
 import { registerSaleRoutes } from "./routes/sales.js";
 import { registerStorefrontRoutes } from "./routes/storefront.js";
 
@@ -40,6 +41,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerInventoryRoutes(app);
   await registerPartyAndPurchaseRoutes(app);
   await registerReturnsAndReportsRoutes(app);
+  await registerStoreSettingsRoutes(app);
   await registerSaleRoutes(app);
   await registerStorefrontRoutes(app);
   await registerInventoryEventRoutes(app);
