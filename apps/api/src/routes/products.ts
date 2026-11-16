@@ -44,7 +44,7 @@ export async function registerProductRoutes(app: FastifyInstance) {
     if (!sku || !name || !branchId || !/^\d+(\.\d{1,2})?$/.test(price) || !/^\d+(\.\d{1,2})?$/.test(taxRate)) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "SKU, name, branch, valid price and tax rate are required." } });
     }
-    if ((hsnCode && !/^\\d{4}(?:\\d{2}(?:\\d{2})?)?$/.test(hsnCode)) || unitOfMeasure.length < 1 || unitOfMeasure.length > 20) {
+    if ((hsnCode && !/^\d{4}(?:\d{2}(?:\d{2})?)?$/.test(hsnCode)) || unitOfMeasure.length < 1 || unitOfMeasure.length > 20) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "HSN code must be 4, 6 or 8 digits and unit must be 1–20 characters." } });
     }
     if (Number(taxRate) > 100) {
