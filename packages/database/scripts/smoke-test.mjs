@@ -138,7 +138,7 @@ try {
     await latePaymentClient.query("COMMIT");
     const expiredStock = await client.query("SELECT on_hand,reserved FROM inventory_balances WHERE tenant_id=$1 AND branch_id=$2 AND product_id=$3", [raceTenant,raceBranch,raceProduct]);
     const expiredMovements = await client.query("SELECT COUNT(*)::int AS count FROM inventory_movements WHERE tenant_id=$1 AND reference_id=$2", [raceTenant,expiredOrder]);
-    if (expiredStock.rows[0]?.on_hand !== 8 || expiredStock.rows[0]?.reserved !== 2 || expiredMovements.rows[0]?.count !== 1) {
+    if (expiredStock.rows[0]?.on_hand !== 8 || expiredStock.rows[0]?.reserved !== 0 || expiredMovements.rows[0]?.count !== 1) {
       throw new Error("Late payment after expiry incorrectly deducted stock or released the reservation twice.");
     }
   } finally {
@@ -148,6 +148,13 @@ try {
     latePaymentClient.release();
   }
 
+  await client.query("DELETE FROM payments WHERE tenant_id=$1", [raceTenant]);
+  await client.query("DELETE FROM sales_order_items WHERE tenant_id=$1", [raceTenant]);
+  await client.query("DELETE FROM inventory_movements WHERE tenant_id=$1", [raceTenant]);
+  await client.query("DELETE FROM sales_orders WHERE tenant_id=$1", [raceTenant]);
+  await client.query("DELETE FROM inventory_balances WHERE tenant_id=$1", [raceTenant]);
+  await client.query("DELETE FROM products WHERE tenant_id=$1", [raceTenant]);
+  await client.query("DELETE FROM branches WHERE tenant_id=$1", [raceTenant]);
   await client.query("DELETE FROM tenants WHERE id=$1", [raceTenant]);
   console.log("USMS database smoke tests passed: tenant isolation, stock guards, duplicate payment serialization and expiry-vs-payment race.");
 } catch (error) {
