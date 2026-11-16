@@ -1,4 +1,4 @@
-export interface PendingSaleEvent { id: string; createdAt: string; payload: unknown; status: "pending" }
+export interface PendingSaleEvent { id: string; createdAt: string; payload: unknown; status: "pending" | "failed" }
 const DB_NAME = "usms-pos";
 const STORE_NAME = "pending-sales";
 
@@ -36,4 +36,30 @@ export async function listPendingSales(): Promise<PendingSaleEvent[]> {
   });
   db.close();
   return rows;
+}
+
+export async function removePendingSale(id: string): Promise<void> {
+  const db = await openQueueDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("Could not remove synced sale."));
+  });
+  db.close();
+}
+
+export async function markPendingSaleFailed(id: string): Promise<void> {
+  const db = await openQueueDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.get(id);
+    request.onsuccess = () => {
+      if (request.result) store.put({ ...request.result, status: "failed" });
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("Could not update pending sale."));
+  });
+  db.close();
 }
