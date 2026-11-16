@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { requireTenantActor } from "../auth.js";
+import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
 import { notifyInventoryChanged } from "./inventoryEvents.js";
 
@@ -130,6 +130,7 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
         [actor.tenantId, key],
       );
       if (prior.rowCount) return { receipt: prior.rows[0], replayed: true };
+      assertBranchAccess(actor, body.branchId!);
       const branch = await client.query("SELECT id FROM branches WHERE tenant_id = $1 AND id = $2", [actor.tenantId, body.branchId]);
       if (!branch.rowCount) throw Object.assign(new Error("Selected branch was not found."), { statusCode: 404 });
       if (body.supplierId) {
