@@ -391,7 +391,8 @@ export default function App() {
       setMessage(`Stock transfer ${data.transfer.transferNumber} completed.`);
     } catch (e) { setError(e instanceof Error ? e.message : "Stock transfer failed."); }
   }
-\n  async function addCategory(event: FormEvent) {
+
+  async function addCategory(event: FormEvent) {
     event.preventDefault(); setError(""); setMessage("");
     try {
       const data = await api<{ category: { id: string; name: string } }>("/api/v1/business/categories", { method: "POST", body: JSON.stringify({ name: newCategoryName }) }, tenantId);
