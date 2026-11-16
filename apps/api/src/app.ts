@@ -8,6 +8,7 @@ import { registerOnlineOrderRoutes } from "./routes/onlineOrders.js";
 import { registerMeRoutes } from "./routes/me.js";
 import { registerBranchRoutes } from "./routes/branches.js";
 import { registerInventoryEventRoutes } from "./routes/inventoryEvents.js";
+import { registerPartyAndPurchaseRoutes } from "./routes/partiesPurchases.js";
 import { registerSaleRoutes } from "./routes/sales.js";
 import { registerStorefrontRoutes } from "./routes/storefront.js";
 
@@ -36,6 +37,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerBranchRoutes(app);
   await registerProductRoutes(app);
   await registerInventoryRoutes(app);
+  await registerPartyAndPurchaseRoutes(app);
   await registerSaleRoutes(app);
   await registerStorefrontRoutes(app);
   await registerInventoryEventRoutes(app);
