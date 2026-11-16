@@ -67,8 +67,9 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
         [tenantId, key],
       );
       if (prior.rowCount) {
+        const trackingToken = createHmac("sha256", trackingSecret).update(`${tenantId}:${key}`).digest("base64url");
         await client.query("COMMIT");
-        return reply.code(200).send({ order: prior.rows[0], replayed: true });
+        return reply.code(200).send({ order: prior.rows[0], trackingToken, replayed: true });
       }
       const branch = await client.query(
         "SELECT id FROM branches WHERE tenant_id = $1 ORDER BY is_default DESC, created_at ASC LIMIT 1",
@@ -81,7 +82,7 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
       const branchId = branch.rows[0].id as string;
       const orderId = randomUUID();
       const orderNumber = `WEB-${randomUUID().slice(0, 8).toUpperCase()}`;
-      const trackingToken = randomBytes(32).toString("base64url");
+      const trackingToken = createHmac("sha256", trackingSecret).update(`${tenantId}:${key}`).digest("base64url");
       const trackingHash = createHash("sha256").update(trackingToken).digest("hex");
       await client.query(
         `INSERT INTO sales_orders
