@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { requireTenantActor } from "../auth.js";
+import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
 
 type ProductInput = {
