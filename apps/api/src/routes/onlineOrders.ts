@@ -126,6 +126,7 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
           [tenantId, branchId, item.productId, item.quantity, orderId, `${key}:reserve:${item.productId}`],
         );
       }
+      await notifyInventoryChanged(client, { tenantId, branchId, productIds: body.items.map((item) => item.productId) });
       const grandTotal = subtotal + taxTotal;
       const order = await client.query(
         `UPDATE sales_orders SET subtotal = $2, tax_total = $3, grand_total = $4
