@@ -9,7 +9,7 @@ export async function registerOnlineOrderManagementRoutes(app: FastifyInstance) 
     return withTenantTransaction(actor.tenantId, async (client) => {
       const result = await client.query(
         `SELECT o.id, o.order_number AS "orderNumber", o.status, o.payment_status AS "paymentStatus",
-                o.customer_name AS "customerName", o.customer_phone AS "customerPhone",
+                o.customer_name AS "customerName", o.customer_phone AS "customerPhone", o.customer_email AS "customerEmail",\n                o.shipping_address AS "deliveryAddress",
                 o.grand_total::text AS "grandTotal", o.created_at AS "createdAt",
                 o.reservation_expires_at AS "reservationExpiresAt", o.branch_id AS "branchId",
                 b.name AS "branchName",
