@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { requireTenantActor } from "../auth.js";
+import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
 import { notifyInventoryChanged } from "./inventoryEvents.js";
 
@@ -23,6 +23,7 @@ export async function registerInventoryRoutes(app: FastifyInstance) {
     }
 
     const result = await withTenantTransaction(actor.tenantId, async (client) => {
+      assertBranchAccess(actor, body.branchId!);
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
       const prior = await client.query(
         "SELECT id FROM inventory_movements WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1",
