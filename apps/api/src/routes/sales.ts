@@ -9,6 +9,7 @@ type SaleBody = {
   branchId?: string;
   customerName?: string;
   customerPhone?: string;
+  customerId?: string;
   items?: Array<{ productId: string; quantity: number }>;
 };
 
@@ -61,11 +62,22 @@ export async function registerSaleRoutes(app: FastifyInstance) {
         const branch = await client.query("SELECT id FROM branches WHERE tenant_id = $1 AND id = $2", [actor.tenantId, body.branchId]);
         if (!branch.rowCount) throw Object.assign(new Error("Selected branch was not found."), { statusCode: 404 });
 
+        let customerName = body.customerName?.trim() || null;
+        let customerPhone = body.customerPhone?.trim() || null;
+        if (body.customerId) {
+          const customer = await client.query(
+            "SELECT id, name, phone FROM customers WHERE tenant_id = $1 AND id = $2",
+            [actor.tenantId, body.customerId],
+          );
+          if (!customer.rowCount) throw Object.assign(new Error("Selected customer was not found."), { statusCode: 404 });
+          customerName = customer.rows[0].name;
+          customerPhone = customer.rows[0].phone;
+        }
         const orderNumber = `POS-${randomUUID().slice(0, 8).toUpperCase()}`;
         const orderId = (await client.query(
-          `INSERT INTO sales_orders (tenant_id, branch_id, channel, status, order_number, customer_name, customer_phone, idempotency_key)
-           VALUES ($1, $2, 'pos', 'confirmed', $3, $4, $5, $6) RETURNING id`,
-          [actor.tenantId, body.branchId, orderNumber, body.customerName?.trim() || null, body.customerPhone?.trim() || null, key],
+          `INSERT INTO sales_orders (tenant_id, branch_id, channel, status, order_number, customer_id, customer_name, customer_phone, idempotency_key)
+           VALUES ($1, $2, 'pos', 'confirmed', $3, $4, $5, $6, $7) RETURNING id`,
+          [actor.tenantId, body.branchId, orderNumber, body.customerId || null, customerName, customerPhone, key],
         )).rows[0].id as string;
 
         let subtotal = 0n;
