@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
+import { notifyInventoryChanged } from "./inventoryEvents.js";
 
 type SaleBody = {
   branchId?: string;
@@ -104,6 +105,7 @@ export async function registerSaleRoutes(app: FastifyInstance) {
           );
         }
 
+        await notifyInventoryChanged(client, { tenantId: actor.tenantId, branchId: body.branchId!, productIds: body.items!.map((item) => item.productId) });
         const grandTotal = subtotal + taxTotal;
         const updated = await client.query(
           `UPDATE sales_orders SET subtotal = $3, tax_total = $4, grand_total = $5
