@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 type Product = { id: string; sku: string; name: string; description: string | null; price: string; taxRate: string; availableStock: number };
@@ -60,7 +60,7 @@ export default function App() {
     });
   }
 
-  async function checkout(event: React.FormEvent) {
+  async function checkout(event: FormEvent) {
     event.preventDefault();
     if (!cartItems.length || !customerName.trim() || !customerPhone.trim()) return;
     setSubmitting(true);
@@ -87,7 +87,7 @@ export default function App() {
     }
   }
 
-  return <main className="store-shell" style={{ "--store-color": store?.primaryColor ?? "#b7f18b" } as React.CSSProperties}>
+  return <main className="store-shell" style={{ "--store-color": store?.primaryColor ?? "#b7f18b" } as CSSProperties}>
     <header className="store-header">
       <a className="store-brand" href="#"><span className="store-mark">{store?.displayName?.slice(0, 1) ?? "U"}</span><span>{store?.displayName ?? "USMS Store"}</span></a>
       <div className="store-header-right"><span className="live-dot" /> LIVE STORE <a className="cart-pill" href="#cart">Cart · {cartItems.reduce((n, p) => n + cart[p.id], 0)}</a></div>
