@@ -50,7 +50,10 @@ For local-only use, the Docker Compose PostgreSQL password is deliberately simpl
 | POST | `/api/v1/business/inventory/adjustments` | Audited stock adjustment |
 | POST | `/api/v1/pos/sales` | Transactional POS sale with stock deduction |
 | GET | `/api/v1/storefront/:slug` | Published shop catalogue and available stock |
-| POST | `/api/v1/storefront/:slug/orders` | Reserve online order stock for 15 minutes |\n| POST | `/api/v1/storefront/:slug/orders/:orderId/payment` | Create the shop's Razorpay payment order |\n| POST | `/api/v1/storefront/:slug/orders/:orderId/verify-payment` | Verify payment and commit reserved stock |\n| POST | `/api/v1/webhooks/razorpay/:slug` | Verify signed Razorpay webhook events |
+| POST | `/api/v1/storefront/:slug/orders` | Reserve online order stock for 15 minutes |
+| POST | `/api/v1/storefront/:slug/orders/:orderId/payment` | Create the shop's Razorpay payment order |
+| POST | `/api/v1/storefront/:slug/orders/:orderId/verify-payment` | Verify payment and commit reserved stock |
+| POST | `/api/v1/webhooks/razorpay/:slug` | Verify signed Razorpay webhook events |
 | GET | `/api/v1/storefront/:slug/orders/:orderId` | Private token-based order status |
 
 Authenticated business endpoints require a Supabase access token and an `X-USMS-Tenant` header. POS sale and stock adjustment mutations require an `Idempotency-Key` header.
