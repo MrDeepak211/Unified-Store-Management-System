@@ -141,7 +141,7 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
       return reply.code(201).send({
         order: order.rows[0],
         trackingToken,
-        checkout: { status: "awaiting_payment", message: "Stock is reserved for 15 minutes. Payment gateway integration is the next step." },
+        checkout: { status: "awaiting_payment", message: "Stock is reserved for 15 minutes. Complete payment before the reservation expires." },
       });
     } catch (error) {
       await client.query("ROLLBACK");
