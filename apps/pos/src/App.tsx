@@ -225,11 +225,24 @@ export default function App() {
     try {
       const data = await api<{ settings: StoreSettings }>("/api/v1/business/storefront", {
         method: "PUT",
-        body: JSON.stringify({ displayName: storeDisplayName, primaryColor: storeColor, supportPhone: storeSupportPhone, supportEmail: storeSupportEmail, isPublished: !storeSettings?.isPublished }),
+        body: JSON.stringify({ displayName: storeDisplayName, primaryColor: storeColor, supportPhone: storeSupportPhone, supportEmail: storeSupportEmail, isPublished: storeSettings?.isPublished ?? false }),
       }, tenantId);
       setStoreSettings(data.settings);
       setMessage(data.settings.isPublished ? "Your online store is now published." : "Your online store has been unpublished.");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not update your online store."); }
+  }
+
+
+  async function toggleStorefrontPublish() {
+    setError(""); setMessage("");
+    try {
+      const data = await api<{ settings: StoreSettings }>("/api/v1/business/storefront", {
+        method: "PUT",
+        body: JSON.stringify({ displayName: storeDisplayName, primaryColor: storeColor, supportPhone: storeSupportPhone, supportEmail: storeSupportEmail, isPublished: !storeSettings?.isPublished }),
+      }, tenantId);
+      setStoreSettings(data.settings);
+      setMessage(data.settings.isPublished ? "Your online store is now published." : "Your online store has been unpublished.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not change store publishing status."); }
   }
 
   async function addCustomer(event: FormEvent) {
@@ -332,7 +345,7 @@ export default function App() {
         </div>
 
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">ONLINE PRESENCE</span><h3>Your individual store website</h3></div><span className={storeSettings?.isPublished ? "live-label" : "muted"}>{storeSettings?.isPublished ? "● PUBLISHED" : "NOT PUBLISHED"}</span></div>
-          <form className="inline-form" onSubmit={saveStorefront}><label className="store-setting-label">Store display name<input value={storeDisplayName} onChange={(e)=>setStoreDisplayName(e.target.value)} required placeholder="Shop name"/></label><div className="form-grid"><label className="store-setting-label">Brand colour<input type="color" value={storeColor} onChange={(e)=>setStoreColor(e.target.value)}/></label><label className="store-setting-label">Support phone<input value={storeSupportPhone} onChange={(e)=>setStoreSupportPhone(e.target.value)} placeholder="Customer support"/></label></div><label className="store-setting-label">Support email<input type="email" value={storeSupportEmail} onChange={(e)=>setStoreSupportEmail(e.target.value)} placeholder="support@yourshop.com"/></label><button className="secondary-button">{storeSettings?.isPublished ? "Save & unpublish store" : "Save & publish store"}</button></form>
+          <form className="inline-form" onSubmit={saveStorefront}><label className="store-setting-label">Store display name<input value={storeDisplayName} onChange={(e)=>setStoreDisplayName(e.target.value)} required placeholder="Shop name"/></label><div className="form-grid"><label className="store-setting-label">Brand colour<input type="color" value={storeColor} onChange={(e)=>setStoreColor(e.target.value)}/></label><label className="store-setting-label">Support phone<input value={storeSupportPhone} onChange={(e)=>setStoreSupportPhone(e.target.value)} placeholder="Customer support"/></label></div><label className="store-setting-label">Support email<input type="email" value={storeSupportEmail} onChange={(e)=>setStoreSupportEmail(e.target.value)} placeholder="support@yourshop.com"/></label><button className="secondary-button">Save store settings</button><button type="button" className="secondary-button" onClick={()=>void toggleStorefrontPublish()}>{storeSettings?.isPublished ? "Unpublish store" : "Publish online store"}</button></form>
           <p className="store-url">https://{activeShop?.slug ?? "your-shop"}.usms.in</p>
         </div>
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">DAILY SNAPSHOT</span><h3>Business overview</h3></div></div>
