@@ -1,6 +1,6 @@
 {
-  "installCommand": "corepack enable && pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm --filter @usms/pos build",
-  "outputDirectory": "apps/pos/dist",
+  "installCommand": "cd ../.. && corepack enable && pnpm install --frozen-lockfile",
+  "buildCommand": "cd ../.. && pnpm --filter @usms/pos build",
+  "outputDirectory": "dist",
   "rewrites": [{ "source": "/(.*)", "destination": "/" }]
 }
