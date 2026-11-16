@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 type Product = { id: string; sku: string; name: string; description: string | null; price: string; taxRate: string; availableStock: number };
 type Store = { displayName: string; primaryColor: string; logoUrl?: string | null; supportEmail?: string | null; supportPhone?: string | null };
-type OrderResult = { order: { id: string; orderNumber: string; grandTotal: string; reservationExpiresAt: string }; trackingToken: string; checkout: { status: string; message: string } };
+type OrderResult = { order: { id: string; orderNumber: string; grandTotal: string; reservationExpiresAt: string }; trackingToken: string; checkout?: { status: string; message: string } };
 
 function resolveStoreSlug() {
   const configured = import.meta.env.VITE_STORE_SLUG as string | undefined;
@@ -24,7 +24,7 @@ export default function App() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [order, setOrder] = useState<OrderResult | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);\n  const [trackingStatus, setTrackingStatus] = useState("");
 
   async function loadStore() {
     if (!slug) {
@@ -60,7 +60,7 @@ export default function App() {
     });
   }
 
-  async function checkout(event: FormEvent) {
+  async function checkOrder() {\n    if (!order) return;\n    setTrackingStatus("Checking order status…");\n    try {\n      const url = `${API_URL}/api/v1/storefront/${encodeURIComponent(slug)}/orders/${encodeURIComponent(order.order.id)}?token=${encodeURIComponent(order.trackingToken)}`;\n      const response = await fetch(url);\n      const data = await response.json() as { order?: { status: string; paymentStatus: string }; error?: { message?: string } };\n      if (!response.ok || !data.order) throw new Error(data.error?.message ?? "Could not retrieve order status.");\n      setTrackingStatus(`Order status: ${data.order.status} · Payment: ${data.order.paymentStatus}`);\n    } catch (e) { setTrackingStatus(e instanceof Error ? e.message : "Order status unavailable."); }\n  }\n\n  async function checkout(event: FormEvent) {
     event.preventDefault();
     if (!cartItems.length || !customerName.trim() || !customerPhone.trim()) return;
     setSubmitting(true);
