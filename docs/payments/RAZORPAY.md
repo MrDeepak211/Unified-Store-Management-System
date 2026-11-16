@@ -13,7 +13,7 @@ Also set `DATABASE_URL`, `SUPABASE_JWKS_URL`, `SUPABASE_JWT_ISSUER`, and `ORDER_
 1. Activate a Razorpay merchant account in the shop's legal/business name.
 2. In the Razorpay Dashboard, create **test-mode** API keys.
 3. Create a webhook using the exact URL shown in the USMS Business App: `https://<your-api-host>/api/v1/webhooks/razorpay/<shop-slug>`.
-4. Configure webhook events `payment.captured`, `payment.failed`, and `refund.processed`. Use a strong webhook secret and enter that same secret in USMS.
+4. Configure webhook events `payment.captured`, `payment.failed`, `refund.processed`, and `refund.failed`. Use a strong webhook secret and enter that same secret in USMS.
 5. In USMS Business App → Payments, enter the test Key ID, Key Secret, Webhook Secret and select Test mode.
 6. Publish the storefront, place a test order and verify successful, failed, duplicate and expired-reservation payment paths.
 7. Only after the merchant account is approved and end-to-end tests pass, repeat with live keys and Live mode.
