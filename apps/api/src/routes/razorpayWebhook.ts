@@ -83,7 +83,7 @@ export async function registerRazorpayWebhookRoutes(app: FastifyInstance) {
         );
         if (payment.rowCount && Number(payment.rows[0].amount_paise) === paymentEntity.amount && paymentEntity.currency === "INR") {
           const order = await client.query(
-            `SELECT id, branch_id, status, reservation_expires_at
+            `SELECT id, branch_id, status, payment_status, reservation_expires_at
              FROM sales_orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE`,
             [tenantId, payment.rows[0].sales_order_id],
           );
