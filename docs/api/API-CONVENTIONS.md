@@ -12,11 +12,14 @@ Public storefront routes resolve a tenant by its unique shop slug and set transa
 
 - `POST /onboarding/shop` — authenticated first-shop creation.
 - `GET /me/shops` — list only the authenticated user's active shop memberships.
-- `GET /business/branches` — list branches for the selected tenant.
+- `GET /business/branches`, `POST /business/branches` — list and create tenant branches.
+- `POST /business/inventory/transfers` — atomically transfer stock between branches.
+- `GET /business/categories`, `POST /business/categories` — manage product categories.
 - `GET /business/products` — product catalogue with summed available stock.
 - `POST /business/products` — create a product and its initial zero-stock branch balance.
 - `POST /business/inventory/adjustments` — append an audited stock adjustment.
 - `POST /pos/sales` — create a POS sale and atomically decrement available stock.
+- `GET /business/products?branchId=...` — retrieve product stock for a selected branch.
 - `GET /storefront/:slug` — public published catalogue and available stock.
 - `POST /storefront/:slug/orders` — create an online order and reserve stock.
 - `GET /storefront/:slug/orders/:orderId?token=...` — retrieve an order using its high-entropy tracking token.
