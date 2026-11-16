@@ -116,6 +116,14 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       }
       keyId = gateway.rows[0].key_id as string;
       keySecret = decryptPaymentSecret(gateway.rows[0].key_secret_ciphertext as string);
+      const existingPayment = await client.query(
+        "SELECT provider_order_id, amount_paise FROM payments WHERE tenant_id = $1 AND sales_order_id = $2 AND provider = 'razorpay' LIMIT 1",
+        [tenantId, order.id],
+      );
+      if (existingPayment.rowCount && existingPayment.rows[0].provider_order_id) {
+        await client.query("COMMIT");
+        return reply.send({ payment: { provider: "razorpay", keyId, orderId: existingPayment.rows[0].provider_order_id, amount: Number(existingPayment.rows[0].amount_paise), currency: "INR" } });
+      }
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
