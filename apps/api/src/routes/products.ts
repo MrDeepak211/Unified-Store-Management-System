@@ -37,6 +37,7 @@ export async function registerProductRoutes(app: FastifyInstance) {
 
   app.get<{ Querystring: { branchId?: string } }>("/api/v1/business/products", async (request) => {
     const actor = await requireTenantActor(request);
+    if (request.query.branchId) assertBranchAccess(actor, request.query.branchId);
     return withTenantTransaction(actor.tenantId, async (client) => {
       const result = await client.query(
         `SELECT p.id, p.sku, p.name, p.description, p.price::text, p.tax_rate::text AS "taxRate", p.hsn_code AS "hsnCode", p.unit_of_measure AS "unitOfMeasure", p.barcode, p.category_id AS "categoryId", c.name AS "categoryName",
