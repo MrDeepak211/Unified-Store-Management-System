@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { getPool } from "../db.js";
+import { notifyInventoryChanged } from "./inventoryEvents.js";
 
 type OnlineOrderBody = {
   customerName?: string;
