@@ -10,6 +10,7 @@ type SaleBody = {
   customerName?: string;
   customerPhone?: string;
   customerId?: string;
+  paymentMethod?: "cash" | "upi" | "card" | "bank_transfer" | "credit";
   items?: Array<{ productId: string; quantity: number }>;
 };
 
@@ -37,7 +38,7 @@ export async function registerSaleRoutes(app: FastifyInstance) {
     if (typeof key !== "string" || key.length < 8 || key.length > 128) {
       return reply.code(400).send({ error: { code: "IDEMPOTENCY_KEY_REQUIRED", message: "Send a unique Idempotency-Key header (8–128 characters)." } });
     }
-    if (!body.branchId || !Array.isArray(body.items) || body.items.length === 0 || body.items.length > 100) {
+    if (!body.branchId || !Array.isArray(body.items) || body.items.length === 0 || body.items.length > 100 || (body.paymentMethod !== undefined && !["cash","upi","card","bank_transfer","credit"].includes(body.paymentMethod))) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "A branch and at least one sale item are required." } });
     }
     const productIds = body.items.map((item) => item.productId);
@@ -79,9 +80,9 @@ export async function registerSaleRoutes(app: FastifyInstance) {
         }
         const orderNumber = `POS-${randomUUID().slice(0, 8).toUpperCase()}`;
         const orderId = (await client.query(
-          `INSERT INTO sales_orders (tenant_id, branch_id, channel, status, order_number, customer_id, customer_name, customer_phone, idempotency_key)
-           VALUES ($1, $2, 'pos', 'confirmed', $3, $4, $5, $6, $7) RETURNING id`,
-          [actor.tenantId, body.branchId, orderNumber, body.customerId || null, customerName, customerPhone, key],
+          `INSERT INTO sales_orders (tenant_id, branch_id, channel, status, order_number, customer_id, customer_name, customer_phone, payment_status, payment_method, idempotency_key)
+           VALUES ($1, $2, 'pos', 'confirmed', $3, $4, $5, $6, 'paid', $7, $8) RETURNING id`,
+          [actor.tenantId, body.branchId, orderNumber, body.customerId || null, customerName, customerPhone, body.paymentMethod ?? "cash", key],
         )).rows[0].id as string;
 
         let subtotal = 0n;
