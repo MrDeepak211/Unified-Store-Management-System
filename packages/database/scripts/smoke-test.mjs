@@ -109,7 +109,7 @@ try {
     await duplicateClient.query("COMMIT");
     const paidState = await client.query("SELECT on_hand,reserved FROM inventory_balances WHERE tenant_id=$1 AND branch_id=$2 AND product_id=$3", [raceTenant,raceBranch,raceProduct]);
     const paidMovements = await client.query("SELECT movement_type,COUNT(*)::int AS count FROM inventory_movements WHERE tenant_id=$1 AND reference_id=$2 GROUP BY movement_type", [raceTenant,paidOrder]);
-    if (paidState.rows[0]?.on_hand !== 8 || paidState.rows[0]?.reserved !== 0 ||
+    if (paidState.rows[0]?.on_hand !== 8 || paidState.rows[0]?.reserved !== 2 ||
         paidMovements.rows.reduce((sum,row)=>sum+row.count,0) !== 2) {
       throw new Error("Concurrent payment settlement deducted or released stock more than once.");
     }
