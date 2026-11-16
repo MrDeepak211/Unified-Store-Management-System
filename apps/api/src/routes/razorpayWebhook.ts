@@ -153,6 +153,11 @@ export async function registerRazorpayWebhookRoutes(app: FastifyInstance) {
             await notifyInventoryChanged(client, { tenantId, branchId: order.rows[0].branch_id, productIds: items.rows.map((item) => item.product_id as string) });
           }
         }
+      } else if (eventType === "refund.failed" && refundEntity?.payment_id) {
+        await client.query(
+          "UPDATE payments SET status = 'captured', updated_at = now() WHERE tenant_id = $1 AND provider = 'razorpay' AND provider_payment_id = $2 AND status = 'refund_pending'",
+          [tenantId, refundEntity.payment_id],
+        );
       } else if (eventType === "refund.processed" && refundEntity?.payment_id) {
         const payment = await client.query(
           "SELECT sales_order_id FROM payments WHERE tenant_id = $1 AND provider = 'razorpay' AND provider_payment_id = $2",
