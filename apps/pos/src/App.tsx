@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
-import { listPendingSales } from "./offlineQueue";
+import { enqueuePendingSale, listPendingSales, markPendingSaleFailed, removePendingSale } from "./offlineQueue";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 type Shop = { tenantId: string; shopName: string; slug: string; role: string };
@@ -107,6 +107,30 @@ export default function App() {
     const data = await response.json() as T & { error?: { message?: string } };
     if (!response.ok) throw new Error(data.error?.message ?? `Request failed (${response.status}).`);
     return data;
+  }
+
+
+  async function syncPendingQueue() {
+    if (!session || !tenantId || !navigator.onLine) return;
+    const rows = await listPendingSales();
+    for (const row of rows) {
+      if (row.status === "failed") continue;
+      const payload = row.payload as { branchId: string; items: CartLine[] };
+      try {
+        await api("/api/v1/pos/sales", {
+          method: "POST",
+          headers: { "Idempotency-Key": row.id },
+          body: JSON.stringify(payload),
+        }, tenantId);
+        await removePendingSale(row.id);
+      } catch (e) {
+        if (e instanceof TypeError || (e instanceof Error && /Request failed \(5\d\d\)/.test(e.message))) break;
+        await markPendingSaleFailed(row.id);
+      }
+    }
+    const remaining = await listPendingSales();
+    setPendingCount(remaining.length);
+    if (rows.length > remaining.length) setMessage("Offline sales synced. The server confirmed stock and generated invoices.");
   }
 
   async function loadShops() {
@@ -395,7 +419,20 @@ export default function App() {
       setCart([]);
       await loadBusinessData();
       setMessage(`Sale ${data.order.orderNumber} · Invoice ${data.order.invoiceNumber} · ₹${data.order.grandTotal}`);
-    } catch (e) { setError(e instanceof Error ? e.message : "Sale could not be completed."); }
+    } catch (e) {
+      if (e instanceof TypeError) {
+        try {
+          await enqueuePendingSale({ branchId, items: cart });
+          setCart([]);
+          setPendingCount((count) => (count ?? 0) + 1);
+          setMessage("Offline sale saved on this device. It is NOT confirmed yet; stock will be validated when the connection returns.");
+        } catch {
+          setError("Network unavailable and the local sale queue could not be saved. Do not hand over goods until the sale is recorded.");
+        }
+      } else {
+        setError(e instanceof Error ? e.message : "Sale could not be completed.");
+      }
+    }
   }
 
   if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
