@@ -5,13 +5,14 @@ import { fileURLToPath } from "node:url";
 
 const { Pool } = pg;
 const directory = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
-if (!process.env.DATABASE_URL) {
+const migrationUrl = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
+if (!migrationUrl) {
   console.error("DATABASE_URL is required. Copy the API environment example and configure PostgreSQL.");
   process.exit(1);
 }
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: migrationUrl,
   ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: true } : undefined,
 });
 try {
