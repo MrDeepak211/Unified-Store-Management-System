@@ -59,8 +59,12 @@ export async function registerSaleRoutes(app: FastifyInstance) {
         );
         if (prior.rowCount) return { order: prior.rows[0], replayed: true };
 
-        assertBranchAccess(actor, body.branchId!);
+        const branch = await client.query(
+          "SELECT id FROM branches WHERE tenant_id = $1 AND id = $2",
+          [actor.tenantId, body.branchId],
+        );
         if (!branch.rowCount) throw Object.assign(new Error("Selected branch was not found."), { statusCode: 404 });
+        assertBranchAccess(actor, body.branchId!);
 
         let customerName = body.customerName?.trim() || null;
         let customerPhone = body.customerPhone?.trim() || null;
