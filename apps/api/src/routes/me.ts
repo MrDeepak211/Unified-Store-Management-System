@@ -21,7 +21,7 @@ export async function registerMeRoutes(app: FastifyInstance) {
       await client.query("BEGIN");
       await client.query("SELECT set_config('app.auth_subject', $1, true)", [subject]);
       const result = await client.query(
-        `SELECT m.id AS "membershipId", m.tenant_id AS "tenantId", m.role,
+        `SELECT m.id AS "membershipId", m.tenant_id AS "tenantId", m.role, m.branch_ids AS "branchIds",
                 t.name AS "shopName", t.slug, t.status
          FROM tenant_memberships m
          JOIN tenants t ON t.id = m.tenant_id
