@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { decryptPaymentSecret } from "../paymentCrypto.js";
 import { getPool, withTenantTransaction } from "../db.js";
 import { notifyInventoryChanged } from "./inventoryEvents.js";
+import { issueSalesInvoice } from "../invoices.js";
 
 type RazorpayWebhook = {
   event?: string;
@@ -110,6 +111,7 @@ export async function registerRazorpayWebhookRoutes(app: FastifyInstance) {
               );
             }
             await client.query("UPDATE sales_orders SET status = 'confirmed', payment_status = 'paid' WHERE tenant_id = $1 AND id = $2", [tenantId, order.rows[0].id]);
+            await issueSalesInvoice(client, tenantId, order.rows[0].id);
             await client.query("UPDATE payments SET status = 'captured', provider_payment_id = $3, updated_at = now() WHERE tenant_id = $1 AND id = $2", [tenantId, payment.rows[0].id, paymentEntity.id]);
             await notifyInventoryChanged(client, { tenantId, branchId: order.rows[0].branch_id, productIds: items.rows.map((item) => item.product_id as string) });
           } else {
