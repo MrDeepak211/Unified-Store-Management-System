@@ -62,7 +62,7 @@ function streamInventoryEvents(
   };
   const heartbeat = setInterval(() => response.write(": keep-alive\n\n"), 20_000);
   emitter.on("inventory", send);
-  request.raw.on("close", () => {
+  response.on("close", () => {
     clearInterval(heartbeat);
     emitter.off("inventory", send);
   });
