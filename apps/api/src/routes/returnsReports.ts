@@ -123,7 +123,7 @@ export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
   app.get("/api/v1/business/reports/overview", async (request) => {
     const actor = await requireTenantActor(request);
     return withTenantTransaction(actor.tenantId, async (client) => {
-      const [sales, stock, purchases, online] = await Promise.all([
+      const [sales, stock, purchases, online, expenses, cashSales] = await Promise.all([
         client.query(
           `SELECT COUNT(*)::int AS count, COALESCE(SUM(grand_total),0)::text AS revenue
            FROM sales_orders WHERE tenant_id = $1 AND channel = 'pos' AND status IN ('confirmed','fulfilled') AND ($2::uuid[] IS NULL OR branch_id = ANY($2))
@@ -147,9 +147,23 @@ export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
            FROM sales_orders WHERE tenant_id = $1 AND channel = 'online' AND status = 'pending' AND ($2::uuid[] IS NULL OR branch_id = ANY($2))`,
           [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
         ),
+        client.query(
+          `SELECT COALESCE(SUM(amount),0)::text AS spend,
+                  COALESCE(SUM(amount) FILTER (WHERE payment_method = 'cash'),0)::text AS cash_out
+           FROM expenses WHERE tenant_id = $1 AND ($2::uuid[] IS NULL OR branch_id = ANY($2))
+             AND expense_date = (now() AT TIME ZONE 'Asia/Kolkata')::date`,
+          [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
+        ),
+        client.query(
+          `SELECT COALESCE(SUM(grand_total),0)::text AS cash_in
+           FROM sales_orders WHERE tenant_id = $1 AND channel = 'pos' AND payment_status = 'paid' AND payment_method = 'cash'
+             AND ($2::uuid[] IS NULL OR branch_id = ANY($2))
+             AND created_at >= date_trunc('day', now())`,
+          [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
+        ),
       ]);
       return {
-        today: { posSalesCount: sales.rows[0].count, posRevenue: sales.rows[0].revenue, purchaseSpend: purchases.rows[0].spend },
+        today: { posSalesCount: sales.rows[0].count, posRevenue: sales.rows[0].revenue, purchaseSpend: purchases.rows[0].spend, expenseSpend: expenses.rows[0].spend, cashIn: cashSales.rows[0].cash_in, cashOut: expenses.rows[0].cash_out, netCash: (Number(cashSales.rows[0].cash_in) - Number(expenses.rows[0].cash_out)).toFixed(2) },
         inventory: stock.rows[0],
         online: { pendingOrders: online.rows[0].pending },
       };
