@@ -4,6 +4,7 @@ import { requireTenantActor } from "../auth.js";
 import { decryptPaymentSecret, encryptPaymentSecret } from "../paymentCrypto.js";
 import { getPool, withTenantTransaction } from "../db.js";
 import { notifyInventoryChanged } from "./inventoryEvents.js";
+import { issueSalesInvoice } from "../invoices.js";
 
 type GatewayConfigBody = { keyId?: string; keySecret?: string; webhookSecret?: string; mode?: "test" | "live" };
 type StartPaymentBody = { trackingToken?: string };
@@ -276,6 +277,7 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
         );
       }
       await db.query("UPDATE sales_orders SET status = 'confirmed', payment_status = 'paid' WHERE tenant_id = $1 AND id = $2", [tenantId, order.id]);
+      await issueSalesInvoice(db, tenantId!, order.id);
       await db.query("UPDATE payments SET status = 'captured', provider_payment_id = $3, updated_at = now() WHERE tenant_id = $1 AND sales_order_id = $2", [tenantId, order.id, body.razorpayPaymentId]);
       await notifyInventoryChanged(db, { tenantId: tenantId!, branchId: order.branch_id, productIds: items.rows.map((item) => item.product_id as string) });
       return { expired: false, alreadyPaid: false };
