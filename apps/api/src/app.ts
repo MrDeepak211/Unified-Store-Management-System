@@ -5,6 +5,8 @@ import { registerProductRoutes } from "./routes/products.js";
 import { registerOnboardingRoutes } from "./routes/onboarding.js";
 import { registerInventoryRoutes } from "./routes/inventory.js";
 import { registerOnlineOrderRoutes } from "./routes/onlineOrders.js";
+import { registerMeRoutes } from "./routes/me.js";
+import { registerBranchRoutes } from "./routes/branches.js";
 import { registerSaleRoutes } from "./routes/sales.js";
 import { registerStorefrontRoutes } from "./routes/storefront.js";
 
@@ -28,7 +30,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     capabilities: ["individual-storefronts", "shared-inventory", "pos-sales"],
   }));
 
+  await registerMeRoutes(app);
   await registerOnboardingRoutes(app);
+  await registerBranchRoutes(app);
   await registerProductRoutes(app);
   await registerInventoryRoutes(app);
   await registerSaleRoutes(app);
