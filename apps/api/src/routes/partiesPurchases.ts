@@ -34,9 +34,9 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
                 r.created_at AS "createdAt", s.name AS "supplierName"
          FROM purchase_receipts r
          LEFT JOIN suppliers s ON s.tenant_id = r.tenant_id AND s.id = r.supplier_id
-         WHERE r.tenant_id = $1
+         WHERE r.tenant_id = $1 AND ($2::uuid[] IS NULL OR r.branch_id = ANY($2))
          ORDER BY r.created_at DESC LIMIT 100`,
-        [actor.tenantId],
+        [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
       );
       return { receipts: result.rows };
     });
