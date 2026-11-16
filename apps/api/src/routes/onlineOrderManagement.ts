@@ -21,7 +21,7 @@ export async function registerOnlineOrderManagementRoutes(app: FastifyInstance) 
                 )) FILTER (WHERE i.id IS NOT NULL), '[]'::json) AS items
          FROM sales_orders o
          JOIN branches b ON b.tenant_id = o.tenant_id AND b.id = o.branch_id
-         LEFT JOIN sales_order_items i ON i.tenant_id = o.tenant_id AND i.order_id = o.id
+         LEFT JOIN sales_order_items i ON i.tenant_id = o.tenant_id AND i.order_id = o.id\n         LEFT JOIN payments p ON p.tenant_id = o.tenant_id AND p.sales_order_id = o.id
          WHERE o.tenant_id = $1 AND o.channel = 'online'
            AND ($2::uuid[] IS NULL OR o.branch_id = ANY($2))
          GROUP BY o.id, b.name
