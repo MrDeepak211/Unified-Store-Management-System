@@ -156,11 +156,11 @@ export default function App() {
     try {
       const branchData = await api<{ branches: Branch[] }>("/api/v1/business/branches", {}, selectedTenant);
       setBranches(branchData.branches);
-      setFromBranchId((current) => current || activeBranchId);
-      setToBranchId((current) => current || branchData.branches.find((branch) => branch.id !== activeBranchId)?.id || "");
       const chosenBranch = branchData.branches.find((branch) => branch.id === branchId) ?? branchData.branches.find((branch) => branch.isDefault) ?? branchData.branches[0];
       const activeBranchId = chosenBranch?.id ?? "";
       if (activeBranchId && activeBranchId !== branchId) setBranchId(activeBranchId);
+      setFromBranchId((current) => current || activeBranchId);
+      setToBranchId((current) => current || branchData.branches.find((branch) => branch.id !== activeBranchId)?.id || "");
       const [productData, customerData, supplierData, receiptData, salesData, reportData, storeData, gatewayData, profileData, invoiceData, categoryData] = await Promise.all([
         api<{ products: Product[] }>(`/api/v1/business/products?branchId=${encodeURIComponent(activeBranchId)}`, {}, selectedTenant),
         api<{ customers: Party[] }>("/api/v1/business/customers", {}, selectedTenant),
