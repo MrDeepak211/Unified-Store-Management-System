@@ -261,9 +261,7 @@ export default function App() {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const frames = buffer.split("
-
-");
+          const frames = buffer.split("\n\n");
           buffer = frames.pop() ?? "";
           if (frames.some((frame) => frame.startsWith("data: "))) void loadBusinessData(tenantId);
         }
