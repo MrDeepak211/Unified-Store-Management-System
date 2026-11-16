@@ -92,7 +92,8 @@ export default function App() {
   const [gstin, setGstin] = useState("");
   const [stateCode, setStateCode] = useState("27");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [staff, setStaff] = useState<StaffMember[]>([]);\n  const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [onlineOrders, setOnlineOrders] = useState<OnlineOrder[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"manager" | "cashier" | "viewer">("cashier");
   const [inviteBranchIds, setInviteBranchIds] = useState<string[]>([]);
@@ -179,7 +180,8 @@ export default function App() {
         api<{ razorpay: GatewaySettings | null }>("/api/v1/business/payments/razorpay", {}, selectedTenant),
         api<{ profile: BusinessProfile }>("/api/v1/business/profile", {}, selectedTenant),
         api<{ invoices: Invoice[] }>("/api/v1/business/invoices", {}, selectedTenant),
-        api<{ categories: Array<{id:string;name:string}> }>("/api/v1/business/categories", {}, selectedTenant),\n        api<{ orders: OnlineOrder[] }>("/api/v1/business/online-orders", {}, selectedTenant),
+        api<{ categories: Array<{id:string;name:string}> }>("/api/v1/business/categories", {}, selectedTenant),
+        api<{ orders: OnlineOrder[] }>("/api/v1/business/online-orders", {}, selectedTenant),
       ]);
       setProducts(productData.products);
       setStockProductId((current) => current || productData.products[0]?.id || "");
@@ -201,7 +203,8 @@ export default function App() {
       setGstin(profileData.profile?.gstin ?? "");
       setStateCode(profileData.profile?.stateCode ?? "27");
       setInvoices(invoiceData.invoices);
-      setCategories(categoryData.categories);\n      setOnlineOrders(onlineOrderData.orders);
+      setCategories(categoryData.categories);
+      setOnlineOrders(onlineOrderData.orders);
       setPurchaseProductId((current) => current || productData.products[0]?.id || "");
       setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load shop data."); }
@@ -332,7 +335,8 @@ export default function App() {
       setMessage(action === "fulfil" ? "Online order marked fulfilled." : "Unpaid online order cancelled and stock released.");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not update online order."); }
   }
-\n  async function loadStaff() {
+
+  async function loadStaff() {
     try {
       const data = await api<{ staff: StaffMember[] }>("/api/v1/business/staff", {}, tenantId);
       setStaff(data.staff);
