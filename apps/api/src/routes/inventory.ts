@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
+import { notifyInventoryChanged } from "./inventoryEvents.js";
 
 type AdjustmentBody = {
   branchId?: string;
@@ -50,6 +51,7 @@ export async function registerInventoryRoutes(app: FastifyInstance) {
          VALUES ($1, $2, $3, 'adjustment', $4, $5, $6) RETURNING id`,
         [actor.tenantId, body.branchId, body.productId, body.delta, key, body.note?.trim() || null],
       );
+      await notifyInventoryChanged(client, { tenantId: actor.tenantId, branchId: body.branchId!, productIds: [body.productId!] });
       return { movementId: movement.rows[0].id, stock: updated.rows[0], replayed: false };
     }).catch((error: unknown) => {
       throw error;
