@@ -47,6 +47,7 @@ function streamInventoryEvents(
   request: FastifyRequest,
   reply: FastifyReply,
   tenantId: string,
+  branchIds?: string[],
 ) {
   reply.hijack();
   const response = reply.raw;
@@ -58,7 +59,7 @@ function streamInventoryEvents(
   });
   response.write("retry: 3000\n\n");
   const send = (event: InventoryEvent) => {
-    if (event.tenantId === tenantId) response.write(`data: ${JSON.stringify(event)}\n\n`);
+    if (event.tenantId === tenantId && (!branchIds?.length || branchIds.includes(event.branchId))) response.write(`data: ${JSON.stringify(event)}\n\n`);
   };
   const heartbeat = setInterval(() => response.write(": keep-alive\n\n"), 20_000);
   emitter.on("inventory", send);
@@ -71,7 +72,7 @@ function streamInventoryEvents(
 export async function registerInventoryEventRoutes(app: FastifyInstance) {
   app.get("/api/v1/business/events", async (request, reply) => {
     const actor = await requireTenantActor(request);
-    streamInventoryEvents(request, reply, actor.tenantId);
+    streamInventoryEvents(request, reply, actor.tenantId, actor.branchIds);
   });
 
   app.get<{ Params: { slug: string } }>("/api/v1/storefront/:slug/events", async (request, reply) => {
