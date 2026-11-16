@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 type CreateBranchBody = { name?: string; code?: string; address?: Record<string, unknown>; isDefault?: boolean };
-import { requireTenantActor } from "../auth.js";
+import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
 
 export async function registerBranchRoutes(app: FastifyInstance) {
@@ -35,8 +35,8 @@ export async function registerBranchRoutes(app: FastifyInstance) {
     return withTenantTransaction(actor.tenantId, async (client) => {
       const result = await client.query(
         `SELECT id, name, code, address, is_default AS "isDefault"
-         FROM branches WHERE tenant_id = $1 ORDER BY is_default DESC, name ASC`,
-        [actor.tenantId],
+         FROM branches WHERE tenant_id = $1 AND ($2::uuid[] IS NULL OR id = ANY($2)) ORDER BY is_default DESC, name ASC`,
+        [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
       );
       return { branches: result.rows };
     });
