@@ -2,6 +2,8 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerProductRoutes } from "./routes/products.js";
+import { registerOnboardingRoutes } from "./routes/onboarding.js";
+import { registerInventoryRoutes } from "./routes/inventory.js";
 import { registerSaleRoutes } from "./routes/sales.js";
 import { registerStorefrontRoutes } from "./routes/storefront.js";
 
@@ -25,7 +27,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     capabilities: ["individual-storefronts", "shared-inventory", "pos-sales"],
   }));
 
+  await registerOnboardingRoutes(app);
   await registerProductRoutes(app);
+  await registerInventoryRoutes(app);
   await registerSaleRoutes(app);
   await registerStorefrontRoutes(app);
 
