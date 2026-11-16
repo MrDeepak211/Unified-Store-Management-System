@@ -51,7 +51,7 @@ export async function registerProductRoutes(app: FastifyInstance) {
         `INSERT INTO products (tenant_id, sku, name, description, price, tax_rate)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id, sku, name, description, price::text, tax_rate::text AS "taxRate"`,
-        [actor.tenantId, sku, name, body.description?.trim() || null, price, taxRate],
+        [actor.tenantId, sku, name, (typeof body.description === "string" ? body.description.trim() : "") || null, price, taxRate],
       );
       const row = inserted.rows[0];
       await client.query(
