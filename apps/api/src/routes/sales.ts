@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
 import { notifyInventoryChanged } from "./inventoryEvents.js";
+import { issueSalesInvoice } from "../invoices.js";
 
 type SaleBody = {
   branchId?: string;
@@ -113,7 +114,8 @@ export async function registerSaleRoutes(app: FastifyInstance) {
            RETURNING id, order_number AS "orderNumber", status, subtotal::text, tax_total::text AS "taxTotal", grand_total::text AS "grandTotal"`,
           [actor.tenantId, orderId, money(subtotal), money(taxTotal), money(grandTotal)],
         );
-        return { order: updated.rows[0], replayed: false };
+        const invoice = await issueSalesInvoice(client, actor.tenantId, orderId);
+        return { order: { ...updated.rows[0], invoiceNumber: invoice.invoiceNumber }, replayed: false };
       });
       return reply.code(result.replayed ? 200 : 201).send(result);
     } catch (error) {
