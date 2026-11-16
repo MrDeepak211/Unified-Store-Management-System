@@ -187,7 +187,11 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       }
       keyId = gateway.rows[0].key_id as string;
       keySecret = decryptPaymentSecret(gateway.rows[0].key_secret_ciphertext as string);
-      if (order.status === "confirmed" && order.payment_status === "paid") {\n        await client.query("COMMIT");\n        return reply.send({ status: "paid", orderId: order.id, message: "Payment was already verified." });\n      }\n      const payment = await client.query(
+      if (order.status === "confirmed" && order.payment_status === "paid") {
+        await client.query("COMMIT");
+        return reply.send({ status: "paid", orderId: order.id, message: "Payment was already verified." });
+      }
+      const payment = await client.query(
         "SELECT id, provider_order_id, amount_paise, status FROM payments WHERE tenant_id = $1 AND sales_order_id = $2 AND provider = 'razorpay' LIMIT 1",
         [tenantId, order.id],
       );
@@ -197,7 +201,6 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
       }
       const expected = createHash("sha256").update(body.razorpayOrderId + "|" + body.razorpayPaymentId).digest("hex");
       // HMAC-SHA256 is the documented Razorpay Checkout signature construction.
-      const { createHmac } = await import("node:crypto");
       const signature = createHmac("sha256", keySecret).update(body.razorpayOrderId + "|" + body.razorpayPaymentId).digest("hex");
       if (!safeEqualHex(signature, body.razorpaySignature)) {
         await client.query("ROLLBACK");
@@ -233,10 +236,11 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
 
     const finalized = await withTenantTransaction(tenantId!, async (db) => {
       const locked = await db.query(
-        "SELECT status, reservation_expires_at FROM sales_orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
+        "SELECT status, payment_status, reservation_expires_at FROM sales_orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
         [tenantId, order.id],
       );
-      if (locked.rowCount && locked.rows[0].status === "confirmed") return { expired: false, alreadyPaid: true };\n      if (!locked.rowCount || locked.rows[0].status !== "pending" || new Date(locked.rows[0].reservation_expires_at).getTime() <= Date.now()) {
+      if (locked.rowCount && locked.rows[0].status === "confirmed" && locked.rows[0].payment_status === "paid") return { expired: false, alreadyPaid: true };
+      if (!locked.rowCount || locked.rows[0].status !== "pending" || new Date(locked.rows[0].reservation_expires_at).getTime() <= Date.now()) {
         await db.query("UPDATE payments SET status = 'refund_pending', provider_payment_id = $3, updated_at = now() WHERE tenant_id = $1 AND sales_order_id = $2", [tenantId, order.id, body.razorpayPaymentId]);
         return { expired: true };
       }
