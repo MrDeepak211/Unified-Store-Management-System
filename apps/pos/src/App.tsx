@@ -13,6 +13,7 @@ type Receipt = { id: string; receiptNumber: string; supplierName?: string | null
 type Sale = { id: string; orderNumber: string; status: string; channel: string; grandTotal: string; items: Array<{ productId: string; quantity: number }> };
 type Overview = { today: { posSalesCount: number; posRevenue: string; purchaseSpend: string }; inventory: { available: number; low_stock: number }; online: { pendingOrders: number } };
 type StoreSettings = { displayName: string; primaryColor: string; supportEmail?: string | null; supportPhone?: string | null; isPublished: boolean };
+type GatewaySettings = { keyId: string; mode: "test" | "live"; isEnabled: boolean };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -61,6 +62,11 @@ export default function App() {
   const [storeColor, setStoreColor] = useState("#2563eb");
   const [storeSupportPhone, setStoreSupportPhone] = useState("");
   const [storeSupportEmail, setStoreSupportEmail] = useState("");
+  const [gatewaySettings, setGatewaySettings] = useState<GatewaySettings | null>(null);
+  const [gatewayKeyId, setGatewayKeyId] = useState("");
+  const [gatewayKeySecret, setGatewayKeySecret] = useState("");
+  const [gatewayWebhookSecret, setGatewayWebhookSecret] = useState("");
+  const [gatewayMode, setGatewayMode] = useState<"test" | "live">("test");
 
   useEffect(() => {
     if (!supabase) { setAuthReady(true); return; }
@@ -100,7 +106,7 @@ export default function App() {
     if (!session || !selectedTenant) return;
     setLoading(true);
     try {
-      const [branchData, productData, customerData, supplierData, receiptData, salesData, reportData, storeData] = await Promise.all([
+      const [branchData, productData, customerData, supplierData, receiptData, salesData, reportData, storeData, gatewayData] = await Promise.all([
         api<{ branches: Branch[] }>("/api/v1/business/branches", {}, selectedTenant),
         api<{ products: Product[] }>("/api/v1/business/products", {}, selectedTenant),
         api<{ customers: Party[] }>("/api/v1/business/customers", {}, selectedTenant),
@@ -109,6 +115,7 @@ export default function App() {
         api<{ sales: Sale[] }>("/api/v1/business/sales", {}, selectedTenant),
         api<Overview>("/api/v1/business/reports/overview", {}, selectedTenant),
         api<{ settings: StoreSettings }>("/api/v1/business/storefront", {}, selectedTenant),
+        api<{ razorpay: GatewaySettings | null }>("/api/v1/business/payments/razorpay", {}, selectedTenant),
       ]);
       setBranches(branchData.branches);
       const chosenBranch = branchData.branches.find((branch) => branch.isDefault) ?? branchData.branches[0];
@@ -125,6 +132,9 @@ export default function App() {
       setStoreColor(storeData.settings?.primaryColor ?? "#2563eb");
       setStoreSupportPhone(storeData.settings?.supportPhone ?? "");
       setStoreSupportEmail(storeData.settings?.supportEmail ?? "");
+      setGatewaySettings(gatewayData.razorpay);
+      setGatewayKeyId(gatewayData.razorpay?.keyId ?? "");
+      setGatewayMode(gatewayData.razorpay?.mode ?? "test");
       setPurchaseProductId((current) => current || productData.products[0]?.id || "");
       setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load shop data."); }
@@ -219,6 +229,20 @@ export default function App() {
   }
 
 
+
+
+  async function saveGateway(event: FormEvent) {
+    event.preventDefault(); setError(""); setMessage("");
+    try {
+      const data = await api<{ razorpay: GatewaySettings }>("/api/v1/business/payments/razorpay", {
+        method: "PUT",
+        body: JSON.stringify({ keyId: gatewayKeyId, keySecret: gatewayKeySecret, webhookSecret: gatewayWebhookSecret, mode: gatewayMode }),
+      }, tenantId);
+      setGatewaySettings(data.razorpay);
+      setGatewayKeySecret(""); setGatewayWebhookSecret("");
+      setMessage("Razorpay account settings saved securely. Configure the webhook URL in your Razorpay Dashboard before accepting live payments.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save payment settings."); }
+  }
 
   async function saveStorefront(event: FormEvent) {
     event.preventDefault(); setError(""); setMessage("");
@@ -347,6 +371,12 @@ export default function App() {
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">ONLINE PRESENCE</span><h3>Your individual store website</h3></div><span className={storeSettings?.isPublished ? "live-label" : "muted"}>{storeSettings?.isPublished ? "● PUBLISHED" : "NOT PUBLISHED"}</span></div>
           <form className="inline-form" onSubmit={saveStorefront}><label className="store-setting-label">Store display name<input value={storeDisplayName} onChange={(e)=>setStoreDisplayName(e.target.value)} required placeholder="Shop name"/></label><div className="form-grid"><label className="store-setting-label">Brand colour<input type="color" value={storeColor} onChange={(e)=>setStoreColor(e.target.value)}/></label><label className="store-setting-label">Support phone<input value={storeSupportPhone} onChange={(e)=>setStoreSupportPhone(e.target.value)} placeholder="Customer support"/></label></div><label className="store-setting-label">Support email<input type="email" value={storeSupportEmail} onChange={(e)=>setStoreSupportEmail(e.target.value)} placeholder="support@yourshop.com"/></label><button className="secondary-button">Save store settings</button><button type="button" className="secondary-button" onClick={()=>void toggleStorefrontPublish()}>{storeSettings?.isPublished ? "Unpublish store" : "Publish online store"}</button></form>
           <p className="store-url">https://{activeShop?.slug ?? "your-shop"}.usms.in</p>
+        </div>
+
+        <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">PAYMENTS</span><h3>Razorpay account</h3></div><span className={gatewaySettings?.isEnabled ? "live-label" : "muted"}>{gatewaySettings?.isEnabled ? "● CONNECTED" : "NOT CONNECTED"}</span></div>
+          <p className="muted">Each shop connects its own Razorpay merchant account. Settlements go to that merchant account, not through USMS.</p>
+          <form className="inline-form" onSubmit={saveGateway}><label className="store-setting-label">Mode<select value={gatewayMode} onChange={(e)=>setGatewayMode(e.target.value as "test" | "live")}><option value="test">Test mode</option><option value="live">Live mode</option></select></label><label className="store-setting-label">Razorpay Key ID<input value={gatewayKeyId} onChange={(e)=>setGatewayKeyId(e.target.value)} required placeholder="rzp_test_…"/></label><label className="store-setting-label">Razorpay Key Secret<input type="password" value={gatewayKeySecret} onChange={(e)=>setGatewayKeySecret(e.target.value)} required placeholder="Paste merchant key secret"/></label><label className="store-setting-label">Webhook Secret<input type="password" value={gatewayWebhookSecret} onChange={(e)=>setGatewayWebhookSecret(e.target.value)} required placeholder="Webhook secret from Razorpay"/></label><button className="secondary-button">Save payment credentials</button></form>
+          <small className="muted">Credentials are encrypted before storage and are never returned to the browser. Use test keys until webhook and payment tests are complete.</small>
         </div>
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">DAILY SNAPSHOT</span><h3>Business overview</h3></div></div>
           <div className="report-list"><div><span>Today's POS revenue</span><b>₹{Number(overview?.today.posRevenue ?? 0).toFixed(2)}</b></div><div><span>POS sales today</span><b>{overview?.today.posSalesCount ?? 0}</b></div><div><span>Purchase spend today</span><b>₹{Number(overview?.today.purchaseSpend ?? 0).toFixed(2)}</b></div><div><span>Online orders awaiting payment</span><b>{overview?.online.pendingOrders ?? 0}</b></div></div>
