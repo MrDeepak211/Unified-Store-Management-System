@@ -35,14 +35,14 @@ export async function registerProductRoutes(app: FastifyInstance) {
     return reply.code(201).send({ category });
   });
 
-  app.get("/api/v1/business/products", async (request) => {
+  app.get<{ Querystring: { branchId?: string } }>("/api/v1/business/products", async (request) => {
     const actor = await requireTenantActor(request);
     return withTenantTransaction(actor.tenantId, async (client) => {
       const result = await client.query(
         `SELECT p.id, p.sku, p.name, p.description, p.price::text, p.tax_rate::text AS "taxRate", p.hsn_code AS "hsnCode", p.unit_of_measure AS "unitOfMeasure", p.barcode, p.category_id AS "categoryId", c.name AS "categoryName",
                 p.is_active AS "isActive", COALESCE(SUM(ib.on_hand - ib.reserved), 0)::int AS "availableStock"
          FROM products p
-         LEFT JOIN inventory_balances ib ON ib.tenant_id = p.tenant_id AND ib.product_id = p.id
+         LEFT JOIN inventory_balances ib ON ib.tenant_id = p.tenant_id AND ib.product_id = p.id AND ($2::uuid IS NULL OR ib.branch_id = $2)
          LEFT JOIN product_categories c ON c.tenant_id = p.tenant_id AND c.id = p.category_id
          WHERE p.tenant_id = $1
          GROUP BY p.id
