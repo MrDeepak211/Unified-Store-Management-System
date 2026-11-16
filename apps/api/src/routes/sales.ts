@@ -72,7 +72,7 @@ export async function registerSaleRoutes(app: FastifyInstance) {
         let taxTotal = 0n;
         for (const item of body.items!) {
           const productResult = await client.query(
-            "SELECT id, price::text, tax_rate::text FROM products WHERE tenant_id = $1 AND id = $2 AND is_active = true",
+            "SELECT id, name, sku, hsn_code, unit_of_measure, price::text, tax_rate::text FROM products WHERE tenant_id = $1 AND id = $2 AND is_active = true",
             [actor.tenantId, item.productId],
           );
           const product = productResult.rows[0];
@@ -95,9 +95,9 @@ export async function registerSaleRoutes(app: FastifyInstance) {
           subtotal += lineCents;
           taxTotal += taxCents;
           await client.query(
-            `INSERT INTO sales_order_items (tenant_id, order_id, product_id, quantity, unit_price, tax_rate, line_total)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [actor.tenantId, orderId, item.productId, item.quantity, product.price, product.tax_rate, money(lineCents)],
+            `INSERT INTO sales_order_items (tenant_id, order_id, product_id, quantity, unit_price, tax_rate, line_total, product_name_snapshot, sku_snapshot, hsn_code_snapshot, unit_of_measure_snapshot)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            [actor.tenantId, orderId, item.productId, item.quantity, product.price, product.tax_rate, money(lineCents), product.name, product.sku, product.hsn_code, product.unit_of_measure],
           );
           await client.query(
             `INSERT INTO inventory_movements (tenant_id, branch_id, product_id, movement_type, quantity_delta, reference_type, reference_id, idempotency_key)
