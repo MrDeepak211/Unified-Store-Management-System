@@ -41,11 +41,13 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   app.setErrorHandler((error, request, reply) => {
     request.log.error({ err: error }, "Unhandled request error");
-    const statusCode = error.statusCode && error.statusCode >= 400 ? error.statusCode : 500;
+    const normalizedError = error instanceof Error ? error : new Error("Unknown request error.");
+    const candidateStatus = "statusCode" in normalizedError ? normalizedError.statusCode : undefined;
+    const statusCode = typeof candidateStatus === "number" && candidateStatus >= 400 ? candidateStatus : 500;
     return reply.status(statusCode).send({
       error: {
         code: statusCode >= 500 ? "INTERNAL_ERROR" : "REQUEST_ERROR",
-        message: statusCode >= 500 ? "An unexpected error occurred." : error.message,
+        message: statusCode >= 500 ? "An unexpected error occurred." : normalizedError.message,
         requestId: request.id,
       },
     });
