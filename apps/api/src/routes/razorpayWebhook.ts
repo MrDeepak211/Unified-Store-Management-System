@@ -159,6 +159,23 @@ export async function registerRazorpayWebhookRoutes(app: FastifyInstance) {
           [tenantId, refundEntity.payment_id],
         );
         if (payment.rowCount) {
+          const order = await client.query("SELECT id, branch_id, status FROM sales_orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE", [tenantId, payment.rows[0].sales_order_id]);
+          if (order.rowCount && order.rows[0].status === "confirmed") {
+            const items = await client.query("SELECT product_id, quantity FROM sales_order_items WHERE tenant_id = $1 AND order_id = $2", [tenantId, order.rows[0].id]);
+            for (const item of items.rows) {
+              await client.query(
+                `UPDATE inventory_balances SET on_hand = on_hand + $4, updated_at = now()
+                 WHERE tenant_id = $1 AND branch_id = $2 AND product_id = $3`,
+                [tenantId, order.rows[0].branch_id, item.product_id, item.quantity],
+              );
+              await client.query(
+                `INSERT INTO inventory_movements (tenant_id, branch_id, product_id, movement_type, quantity_delta, reference_type, reference_id, idempotency_key, notes)
+                 VALUES ($1, $2, $3, 'return', $4, 'sales_order', $5, $6, 'Automatic restock after refund of unfulfilled order')`,
+                [tenantId, order.rows[0].branch_id, item.product_id, item.quantity, order.rows[0].id, `refund:${refundEntity.id ?? refundEntity.payment_id}:restock:${item.product_id}`],
+              );
+            }
+            await notifyInventoryChanged(client, { tenantId, branchId: order.rows[0].branch_id, productIds: items.rows.map((item) => item.product_id as string) });
+          }
           await client.query("UPDATE payments SET status = 'refunded', updated_at = now() WHERE tenant_id = $1 AND provider_payment_id = $2", [tenantId, refundEntity.payment_id]);
           await client.query("UPDATE sales_orders SET status = 'refunded', payment_status = 'refunded' WHERE tenant_id = $1 AND id = $2", [tenantId, payment.rows[0].sales_order_id]);
         }
