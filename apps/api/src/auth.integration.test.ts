@@ -81,6 +81,8 @@ after(async () => {
   if (server) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   if (process.env.DATABASE_URL) {
     const pool = getPool();
+    await pool.query("DELETE FROM tenant_memberships WHERE tenant_id = ANY($1::uuid[])", [[tenantA, tenantB]]);
+    await pool.query("DELETE FROM branches WHERE tenant_id = ANY($1::uuid[])", [[tenantA, tenantB]]);
     await pool.query("DELETE FROM tenants WHERE id = ANY($1::uuid[])", [[tenantA, tenantB]]);
     await closePool();
   }
