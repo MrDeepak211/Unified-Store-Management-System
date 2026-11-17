@@ -12,6 +12,7 @@ const tenantA = randomUUID();
 const tenantB = randomUUID();
 const branchA = randomUUID();
 const branchB = randomUUID();
+const branchC = randomUUID();
 const ownerSubject = randomUUID();
 const cashierSubject = randomUUID();
 const managerSubject = randomUUID();
@@ -64,6 +65,10 @@ before(async () => {
   await pool.query(
     "INSERT INTO branches (id, tenant_id, name, code, is_default) VALUES ($1, $2, 'Main', 'MAIN', true), ($3, $4, 'Other', 'OTHER', true)",
     [branchA, tenantA, branchB, tenantB],
+  );
+  await pool.query(
+    "INSERT INTO branches (id, tenant_id, name, code, is_default) VALUES ($1, $2, 'Restricted', 'RESTRICTED', false)",
+    [branchC, tenantA],
   );
   await pool.query(
     `INSERT INTO tenant_memberships (tenant_id, auth_subject, email, role, branch_ids, is_active)
@@ -157,30 +162,30 @@ test("authenticated tenant membership, inactive access, roles and branch scope a
   await pool.query(
     `INSERT INTO sales_orders (id, tenant_id, branch_id, channel, status, order_number, idempotency_key)
      VALUES ($1, $2, $3, 'pos', 'confirmed', $4, 'manager-sale-replay-key')`,
-    [replaySaleId, tenantA, branchB, `IT-${replaySaleId.slice(0, 8)}`],
+    [replaySaleId, tenantA, branchC, `IT-${replaySaleId.slice(0, 8)}`],
   );
   await pool.query(
     `INSERT INTO inventory_transfers (id, tenant_id, from_branch_id, to_branch_id, transfer_number, idempotency_key)
      VALUES ($1, $2, $3, $4, $5, 'manager-transfer-replay-key')`,
-    [replayTransferId, tenantA, branchB, branchA, `TRF-${replayTransferId.slice(0, 8)}`],
+    [replayTransferId, tenantA, branchA, branchC, `TRF-${replayTransferId.slice(0, 8)}`],
   );
   await pool.query(
     `INSERT INTO sales_returns (id, tenant_id, branch_id, sales_order_id, return_number, status, idempotency_key)
      VALUES ($1, $2, $3, $4, $5, 'inspection_pending', 'manager-return-replay-key')`,
-    [replayReturnId, tenantA, branchB, replaySaleId, `RET-${replayReturnId.slice(0, 8)}`],
+    [replayReturnId, tenantA, branchC, replaySaleId, `RET-${replayReturnId.slice(0, 8)}`],
   );
 
   const replayedSale = await app.inject({
     method: "POST", url: "/api/v1/pos/sales",
     headers: { ...managerHeaders, "content-type": "application/json", "idempotency-key": "manager-sale-replay-key" },
-    payload: { branchId: branchB, items: [{ productId: randomUUID(), quantity: 1 }] },
+    payload: { branchId: branchC, items: [{ productId: randomUUID(), quantity: 1 }] },
   });
   assert.equal(replayedSale.statusCode, 403, replayedSale.body);
 
   const replayedTransfer = await app.inject({
     method: "POST", url: "/api/v1/business/inventory/transfers",
     headers: { ...managerHeaders, "content-type": "application/json", "idempotency-key": "manager-transfer-replay-key" },
-    payload: { fromBranchId: branchB, toBranchId: branchA, items: [{ productId: randomUUID(), quantity: 1 }] },
+    payload: { fromBranchId: branchA, toBranchId: branchC, items: [{ productId: randomUUID(), quantity: 1 }] },
   });
   assert.equal(replayedTransfer.statusCode, 403, replayedTransfer.body);
 
