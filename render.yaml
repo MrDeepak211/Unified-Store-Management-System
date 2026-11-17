@@ -1,13 +1,13 @@
-# USMS staging services on Render.
-# Linked Blueprint branch: staging
-# Secrets are intentionally not committed; Render prompts for sync:false values
-# during initial Blueprint creation. Never paste production credentials here.
+# USMS zero-budget staging API on Render.
+# This Blueprint intentionally provisions only a free web service.
+# The reservation worker stays local during staging; Render background workers
+# require a paid instance. Never add paid services without explicit approval.
 
 services:
   - type: web
     name: usms-staging-api
     runtime: docker
-    plan: starter
+    plan: free
     region: singapore
     branch: staging
     dockerfilePath: ./Dockerfile.api
@@ -44,25 +44,4 @@ services:
       - key: ORDER_TRACKING_SECRET
         sync: false
       - key: PAYMENT_ENCRYPTION_KEY
-        sync: false
-
-  - type: worker
-    name: usms-staging-reservation-worker
-    runtime: docker
-    plan: starter
-    region: singapore
-    branch: staging
-    dockerfilePath: ./Dockerfile.worker
-    dockerContext: .
-    autoDeployTrigger: checksPass
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: LOG_LEVEL
-        value: info
-      - key: DATABASE_SSL
-        value: "true"
-      - key: DB_POOL_MAX
-        value: "3"
-      - key: DATABASE_URL
         sync: false
