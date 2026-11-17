@@ -8,3 +8,58 @@
 .barcode-search{display:flex;gap:7px;margin:4px 0 13px}.barcode-search input{flex:1;min-width:0;border:1px solid #dce5d7;border-radius:5px;background:#f8fbf6;padding:11px;font:10px 'DM Sans'}.barcode-search button{border:0;background:#e4f0dc;color:#3f6637;border-radius:5px;padding:0 12px;font:700 9px 'DM Sans';cursor:pointer}
 .sale-customer{width:100%;margin:10px 0 4px;padding:10px;border:1px solid #dfe5dc;background:#fafbf8;border-radius:5px;font:10px 'DM Sans';color:#27382b}
 .online-order-row{display:flex;justify-content:space-between;gap:15px;align-items:center}.online-order-row>div:first-child{display:grid;gap:4px;min-width:0}.online-order-row small{font-size:9px;color:#849181;overflow-wrap:anywhere}.online-order-actions{display:grid;justify-items:end;gap:4px;flex-shrink:0}.online-order-actions>b{font:700 10px 'DM Mono';color:#2d4930}
+
+
+/* USMS Midnight / Lime design system — staging UI refresh */
+:root{
+  --usms-midnight:#0B0B0C;
+  --usms-surface:#141416;
+  --usms-surface-raised:#1B1B1E;
+  --usms-white:#FFFFFF;
+  --usms-muted:#A1A1AA;
+  --usms-line:#2B2B30;
+  --usms-lime:#C6F432;
+  --usms-lime-soft:#D9FA78;
+}
+.business-app{background:var(--usms-midnight);color:#F4F4F5}
+.sidebar{background:#080809;color:var(--usms-white);border-right:1px solid var(--usms-line)}
+.brand-mark{background:var(--usms-lime);color:var(--usms-midnight)}
+.eyebrow,.side-label{color:#A3B86B}
+.side-brand small,.online-indicator,.business-footer,.muted{color:var(--usms-muted)}
+.side-link{color:#B7B7BE}
+.side-link.active,.side-link:hover{background:#242A12;color:var(--usms-lime)}
+.online-indicator{border-top-color:var(--usms-line)}
+.online-indicator span{background:var(--usms-lime)}
+.side-logout{color:#B7B7BE}
+.main-panel{background:var(--usms-midnight);color:#F4F4F5}
+.business-topbar{border-bottom-color:var(--usms-line)}
+.business-topbar .eyebrow,.welcome-row .eyebrow,.panel-heading .eyebrow{color:#A3B86B}
+.business-topbar h2,.welcome-row h1,.panel-heading h3,.metric-grid strong{color:var(--usms-white)}
+.welcome-row p:not(.eyebrow),.metric-grid small{color:var(--usms-muted)}
+.branch-chip{border-color:var(--usms-line);color:#D4D4D8;background:var(--usms-surface)}
+.metric-grid article,.panel-card{background:var(--usms-surface);border-color:var(--usms-line);color:#F4F4F5}
+.metric-grid span,.panel-heading .eyebrow,.table-head{color:#A1A1AA}
+.table-head,.table-row,.bill-line,.mini-records>div,.report-list>div{border-bottom-color:var(--usms-line)}
+.table-row,.bill-line,.mini-records>div{color:#E4E4E7}
+.table-row b,.report-list b{color:#F4F4F5}
+.table-row strong,.report-list b,.online-order-actions>b{color:var(--usms-lime)}
+.table-row small,.table-row strong.low-stock,.mini-records span,.report-list>div{color:var(--usms-muted)}
+.inline-form,.sale-summary{border-color:var(--usms-line)}
+.form-grid input,.form-grid select,.support-grid select,.store-setting-label input,.barcode-search input,.sale-customer,.topbar-actions select{background:#101013;border-color:var(--usms-line);color:#F4F4F5}
+.form-grid input::placeholder,.barcode-search input::placeholder{color:#85858D}
+.form-grid input:focus,.store-setting-label input:focus,.barcode-search input:focus,.sale-customer:focus{border-color:var(--usms-lime);outline:none}
+.primary-button{background:var(--usms-lime);color:var(--usms-midnight)}
+.secondary-button,.barcode-search button{background:#252D12;border-color:#566A1B;color:var(--usms-lime)}
+.pos-product{background:#101013;border-color:var(--usms-line);color:#F4F4F5}
+.pos-product small,.sale-summary h4 span,.sale-summary>small{color:var(--usms-muted)}
+.pos-product:hover{border-color:var(--usms-lime);background:#1A1F10}
+.bill-total{color:var(--usms-muted)}
+.bill-total strong{color:var(--usms-lime)}
+.business-footer{border-top-color:var(--usms-line)}
+.mini-lists span{background:#252D12;color:var(--usms-lime)}
+.store-setting-label{color:#C4C4CC}
+.store-url,.tiny-action{color:var(--usms-lime)}
+.success-alert{background:#252D12;color:var(--usms-lime)}
+.error-alert{background:#351B1B;color:#FFAAA0}
+.invoice-overlay{background:#080809E8}
+@media(max-width:700px){.sidebar{background:#080809;border-bottom:1px solid var(--usms-line)}}
