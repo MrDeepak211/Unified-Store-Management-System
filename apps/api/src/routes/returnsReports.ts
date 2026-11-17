@@ -52,14 +52,14 @@ export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
     }
     const result = await withTenantTransaction(actor.tenantId, async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
-      const prior = await client.query("SELECT id, return_number AS \"returnNumber\", total::text FROM sales_returns WHERE tenant_id = $1 AND idempotency_key = $2", [actor.tenantId, key]);
-      if (prior.rowCount) return { returnRecord: prior.rows[0], replayed: true };
       const sale = await client.query(
         "SELECT id, branch_id, status FROM sales_orders WHERE tenant_id = $1 AND id = $2 AND status IN ('confirmed','fulfilled')",
         [actor.tenantId, request.params.saleId],
       );
       if (!sale.rowCount) throw Object.assign(new Error("Sale not found or not eligible for return."), { statusCode: 404 });
       assertBranchAccess(actor, sale.rows[0].branch_id);
+      const prior = await client.query("SELECT id, return_number AS \"returnNumber\", total::text FROM sales_returns WHERE tenant_id = $1 AND idempotency_key = $2", [actor.tenantId, key]);
+      if (prior.rowCount) return { returnRecord: prior.rows[0], replayed: true };
       const restock = body.restock !== false;
       const returnId = randomUUID();
       const returnNumber = `RET-${randomUUID().slice(0, 8).toUpperCase()}`;
