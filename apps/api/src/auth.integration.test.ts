@@ -85,6 +85,9 @@ after(async () => {
   if (server) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   if (process.env.DATABASE_URL) {
     const pool = getPool();
+    await pool.query("DELETE FROM sales_returns WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM inventory_transfers WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM sales_orders WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM tenant_memberships WHERE tenant_id = ANY($1::uuid[])", [[tenantA, tenantB]]);
     await pool.query("DELETE FROM branches WHERE tenant_id = ANY($1::uuid[])", [[tenantA, tenantB]]);
     await pool.query("DELETE FROM tenants WHERE id = ANY($1::uuid[])", [[tenantA, tenantB]]);
@@ -146,4 +149,45 @@ test("authenticated tenant membership, inactive access, roles and branch scope a
     payload: { sku: "UNASSIGNED-001", name: "Blocked Product", branchId: branchB, price: "10.00", taxRate: "0" },
   });
   assert.equal(managerProductOnUnassignedBranch.statusCode, 403, managerProductOnUnassignedBranch.body);
+
+  const pool = getPool();
+  const replaySaleId = randomUUID();
+  const replayTransferId = randomUUID();
+  const replayReturnId = randomUUID();
+  await pool.query(
+    `INSERT INTO sales_orders (id, tenant_id, branch_id, channel, status, order_number, idempotency_key)
+     VALUES ($1, $2, $3, 'pos', 'confirmed', $4, 'manager-sale-replay-key')`,
+    [replaySaleId, tenantA, branchB, `IT-${replaySaleId.slice(0, 8)}`],
+  );
+  await pool.query(
+    `INSERT INTO inventory_transfers (id, tenant_id, from_branch_id, to_branch_id, transfer_number, idempotency_key)
+     VALUES ($1, $2, $3, $4, $5, 'manager-transfer-replay-key')`,
+    [replayTransferId, tenantA, branchB, branchA, `TRF-${replayTransferId.slice(0, 8)}`],
+  );
+  await pool.query(
+    `INSERT INTO sales_returns (id, tenant_id, branch_id, sales_order_id, return_number, status, idempotency_key)
+     VALUES ($1, $2, $3, $4, $5, 'inspection_pending', 'manager-return-replay-key')`,
+    [replayReturnId, tenantA, branchB, replaySaleId, `RET-${replayReturnId.slice(0, 8)}`],
+  );
+
+  const replayedSale = await app.inject({
+    method: "POST", url: "/api/v1/pos/sales",
+    headers: { ...managerHeaders, "content-type": "application/json", "idempotency-key": "manager-sale-replay-key" },
+    payload: { branchId: branchB, items: [{ productId: randomUUID(), quantity: 1 }] },
+  });
+  assert.equal(replayedSale.statusCode, 403, replayedSale.body);
+
+  const replayedTransfer = await app.inject({
+    method: "POST", url: "/api/v1/business/inventory/transfers",
+    headers: { ...managerHeaders, "content-type": "application/json", "idempotency-key": "manager-transfer-replay-key" },
+    payload: { fromBranchId: branchB, toBranchId: branchA, items: [{ productId: randomUUID(), quantity: 1 }] },
+  });
+  assert.equal(replayedTransfer.statusCode, 403, replayedTransfer.body);
+
+  const replayedReturn = await app.inject({
+    method: "POST", url: `/api/v1/business/sales/${replaySaleId}/returns`,
+    headers: { ...managerHeaders, "content-type": "application/json", "idempotency-key": "manager-return-replay-key" },
+    payload: { items: [{ productId: randomUUID(), quantity: 1 }] },
+  });
+  assert.equal(replayedReturn.statusCode, 403, replayedReturn.body);
 });
