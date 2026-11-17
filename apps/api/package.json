@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "worker:reservations": "tsx src/workers/reservationExpiry.ts"
+    "worker:reservations": "tsx src/workers/reservationExpiry.ts",
+    "test:auth": "tsx --test src/auth.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
