@@ -46,7 +46,7 @@ export async function registerProductRoutes(app: FastifyInstance) {
          LEFT JOIN inventory_balances ib ON ib.tenant_id = p.tenant_id AND ib.product_id = p.id AND ($2::uuid IS NULL OR ib.branch_id = $2)
          LEFT JOIN product_categories c ON c.tenant_id = p.tenant_id AND c.id = p.category_id
          WHERE p.tenant_id = $1
-         GROUP BY p.id
+         GROUP BY p.id, c.name
          ORDER BY p.name ASC`,
         [actor.tenantId, request.query.branchId ?? null],
       );
