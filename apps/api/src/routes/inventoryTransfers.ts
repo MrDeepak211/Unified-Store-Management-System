@@ -25,11 +25,6 @@ export async function registerInventoryTransferRoutes(app: FastifyInstance) {
     try {
       const result = await withTenantTransaction(actor.tenantId, async (client) => {
         await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
-        const prior = await client.query(
-          "SELECT id, transfer_number AS \"transferNumber\", status FROM inventory_transfers WHERE tenant_id = $1 AND idempotency_key = $2",
-          [actor.tenantId, key],
-        );
-        if (prior.rowCount) return { transfer: prior.rows[0], replayed: true };
         assertBranchAccess(actor, body.fromBranchId!);
         assertBranchAccess(actor, body.toBranchId!);
         const branches = await client.query(
@@ -37,6 +32,11 @@ export async function registerInventoryTransferRoutes(app: FastifyInstance) {
           [actor.tenantId, [body.fromBranchId, body.toBranchId]],
         );
         if (branches.rowCount !== 2) throw Object.assign(new Error("Both branches must belong to this shop."), { statusCode: 404 });
+        const prior = await client.query(
+          "SELECT id, transfer_number AS \"transferNumber\", status FROM inventory_transfers WHERE tenant_id = $1 AND idempotency_key = $2",
+          [actor.tenantId, key],
+        );
+        if (prior.rowCount) return { transfer: prior.rows[0], replayed: true };
         const transferId = randomUUID();
         const transferNumber = `TRF-${randomUUID().slice(0, 8).toUpperCase()}`;
         await client.query(
