@@ -91,6 +91,7 @@ after(async () => {
   if (process.env.DATABASE_URL) {
     const pool = getPool();
     await pool.query("DELETE FROM sales_returns WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM purchase_receipts WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM inventory_transfers WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM sales_orders WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM tenant_memberships WHERE tenant_id = ANY($1::uuid[])", [[tenantA, tenantB]]);
@@ -159,6 +160,7 @@ test("authenticated tenant membership, inactive access, roles and branch scope a
   const replaySaleId = randomUUID();
   const replayTransferId = randomUUID();
   const replayReturnId = randomUUID();
+  const replayPurchaseId = randomUUID();
   await pool.query(
     `INSERT INTO sales_orders (id, tenant_id, branch_id, channel, status, order_number, idempotency_key)
      VALUES ($1, $2, $3, 'pos', 'confirmed', $4, 'manager-sale-replay-key')`,
@@ -173,6 +175,11 @@ test("authenticated tenant membership, inactive access, roles and branch scope a
     `INSERT INTO sales_returns (id, tenant_id, branch_id, sales_order_id, return_number, status, idempotency_key)
      VALUES ($1, $2, $3, $4, $5, 'inspection_pending', 'manager-return-replay-key')`,
     [replayReturnId, tenantA, branchC, replaySaleId, `RET-${replayReturnId.slice(0, 8)}`],
+  );
+  await pool.query(
+    `INSERT INTO purchase_receipts (id, tenant_id, branch_id, receipt_number, idempotency_key)
+     VALUES ($1, $2, $3, $4, 'manager-purchase-replay-key')`,
+    [replayPurchaseId, tenantA, branchC, `GRN-${replayPurchaseId.slice(0, 8)}`],
   );
 
   const replayedSale = await app.inject({
@@ -195,4 +202,11 @@ test("authenticated tenant membership, inactive access, roles and branch scope a
     payload: { items: [{ productId: randomUUID(), quantity: 1 }] },
   });
   assert.equal(replayedReturn.statusCode, 403, replayedReturn.body);
+
+  const replayedPurchase = await app.inject({
+    method: "POST", url: "/api/v1/business/purchases/receipts",
+    headers: { ...managerHeaders, "content-type": "application/json", "idempotency-key": "manager-purchase-replay-key" },
+    payload: { branchId: branchC, items: [{ productId: randomUUID(), quantity: 1, unitCost: "10.00" }] },
+  });
+  assert.equal(replayedPurchase.statusCode, 403, replayedPurchase.body);
 });
