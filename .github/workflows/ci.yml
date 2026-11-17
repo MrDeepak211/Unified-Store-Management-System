@@ -44,6 +44,8 @@ jobs:
         run: pnpm --filter @usms/api test:auth
       - name: Test API routes with Fastify inject
         run: pnpm --filter @usms/api test:api
+      - name: Test authenticated tenant and role boundaries
+        run: pnpm --filter @usms/api test:auth-integration
       - name: Typecheck
         run: pnpm typecheck
       - name: Build
