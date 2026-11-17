@@ -44,3 +44,15 @@ The customer-facing Storefront uses the same premium Midnight foundation for its
 - Do not hard-code Lime Green as the public storefront's only accent; the default fallback may use the approved Lime Green, but each shop's own brand colour takes precedence.
 - Product cards and controls must remain legible on mobile, with visible focus states and reduced-motion support.
 - Business App remains USMS-branded in Midnight/Lime. Printed invoices remain white and print-friendly.
+
+
+## Platform workspaces
+
+The Super Admin control plane and owner Dashboard use the same Midnight/Lime foundation as the Business App:
+- Midnight canvas and raised charcoal panels.
+- White primary headings and lime-highlighted key metrics.
+- Muted secondary text and restrained borders.
+- Responsive single-column layouts on narrow screens.
+- Visible keyboard focus and reduced-motion behavior.
+
+These two apps currently contain foundation/preview content. Their visual theme does not imply that tenant registry, subscription billing, analytics or platform monitoring has been connected or made operational. Keep unavailable metrics represented as unavailable until backed by verified API data.
