@@ -54,18 +54,18 @@ export async function registerSaleRoutes(app: FastifyInstance) {
     try {
       const result = await withTenantTransaction(actor.tenantId, async (client) => {
         await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
-        const prior = await client.query(
-          "SELECT id, order_number AS \"orderNumber\", status, grand_total::text AS \"grandTotal\" FROM sales_orders WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1",
-          [actor.tenantId, key],
-        );
-        if (prior.rowCount) return { order: prior.rows[0], replayed: true };
-
         const branch = await client.query(
           "SELECT id FROM branches WHERE tenant_id = $1 AND id = $2",
           [actor.tenantId, body.branchId],
         );
         if (!branch.rowCount) throw Object.assign(new Error("Selected branch was not found."), { statusCode: 404 });
         assertBranchAccess(actor, body.branchId!);
+
+        const prior = await client.query(
+          "SELECT id, order_number AS \"orderNumber\", status, grand_total::text AS \"grandTotal\" FROM sales_orders WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1",
+          [actor.tenantId, key],
+        );
+        if (prior.rowCount) return { order: prior.rows[0], replayed: true };
 
         let customerName = body.customerName?.trim() || null;
         let customerPhone = body.customerPhone?.trim() || null;
