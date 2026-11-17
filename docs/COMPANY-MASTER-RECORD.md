@@ -101,6 +101,9 @@ The list records code/repository foundations, not a claim that every workflow is
 - `apps/pos/vercel.json`
 - `apps/storefront/vercel.json`
 - `docs/deployment/PRODUCTION.md`
+- `docs/deployment/STAGING.md`
+- `render.yaml` — Render API + worker staging Blueprint
+- `.github/workflows/staging-database.yml` — manually dispatched staging migrations and smoke test
 
 Staging hostnames are not yet confirmed. Do not assume that any suggested `staging-*.usms.in` hostname is already owned, configured or deployed.
 
@@ -135,10 +138,13 @@ The current invoice feature is a sales invoice preview, not a certified GST-comp
 - [x] Repository reviewed; latest known main commit: `f04f93e56f1ab4447cbbecd6fa5817867e52471e`.
 - [x] Existing CI last inspected as successful for migrations, database smoke test, typecheck and build.
 - [x] Staging branch created from `main` for isolated deployment work.
-- [ ] CI execution confirmed on `staging`.
+- [x] Staging branch CI passed for the three initial documentation/CI commits.
+- [x] CI workflow now runs for `main` and `staging`.
+- [x] Render Blueprint prepared for staging API and reservation worker (resources not yet created).
+- [x] Manual GitHub Actions workflow prepared for staging migrations and smoke test.
 - [ ] Local working-tree status confirmed by founder.
-- [ ] Staging database and Supabase project provisioned.
-- [ ] Staging API and reservation worker deployed.
+- [ ] Staging Supabase project and database roles provisioned.
+- [ ] Render Blueprint connected and staging API/worker deployed.
 - [ ] Business App and storefront deployed to staging.
 - [ ] End-to-end staging acceptance checklist completed.
 
