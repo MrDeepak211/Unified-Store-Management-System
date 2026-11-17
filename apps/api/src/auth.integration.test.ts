@@ -14,11 +14,13 @@ const branchA = randomUUID();
 const branchB = randomUUID();
 const ownerSubject = randomUUID();
 const cashierSubject = randomUUID();
+const managerSubject = randomUUID();
 const inactiveSubject = randomUUID();
 let server: Server;
 let jwksUrl = "";
 let ownerToken = "";
 let cashierToken = "";
+let managerToken = "";
 let inactiveToken = "";
 let app: Awaited<ReturnType<typeof buildApp>>;
 
@@ -67,11 +69,13 @@ before(async () => {
     `INSERT INTO tenant_memberships (tenant_id, auth_subject, email, role, branch_ids, is_active)
      VALUES ($1, $2, 'owner@usms.test', 'owner', '{}', true),
             ($1, $3, 'cashier@usms.test', 'cashier', ARRAY[$4]::uuid[], true),
+            ($1, $7, 'manager@usms.test', 'manager', ARRAY[$4]::uuid[], true),
             ($5, $6, 'inactive@usms.test', 'owner', '{}', false)`,
-    [tenantA, ownerSubject, cashierSubject, branchA, tenantB, inactiveSubject],
+    [tenantA, ownerSubject, cashierSubject, branchA, tenantB, inactiveSubject, managerSubject],
   );
   ownerToken = await sign(ownerSubject, privateKey, kid);
   cashierToken = await sign(cashierSubject, privateKey, kid);
+  managerToken = await sign(managerSubject, privateKey, kid);
   inactiveToken = await sign(inactiveSubject, privateKey, kid);
   app = await buildApp();
 });
@@ -91,6 +95,7 @@ after(async () => {
 test("authenticated tenant membership, inactive access, roles and branch scope are enforced", async () => {
   const ownerHeaders = { authorization: `Bearer ${ownerToken}`, "x-usms-tenant": tenantA };
   const cashierHeaders = { authorization: `Bearer ${cashierToken}`, "x-usms-tenant": tenantA };
+  const managerHeaders = { authorization: `Bearer ${managerToken}`, "x-usms-tenant": tenantA };
 
   const ownerProducts = await app.inject({ method: "GET", url: "/api/v1/business/products", headers: ownerHeaders });
   assert.equal(ownerProducts.statusCode, 200, ownerProducts.body);
@@ -134,4 +139,11 @@ test("authenticated tenant membership, inactive access, roles and branch scope a
     method: "GET", url: `/api/v1/business/products?branchId=${branchB}`, headers: cashierHeaders,
   });
   assert.equal(unassignedBranch.statusCode, 403, unassignedBranch.body);
+
+  const managerProductOnUnassignedBranch = await app.inject({
+    method: "POST", url: "/api/v1/business/products",
+    headers: { ...managerHeaders, "content-type": "application/json" },
+    payload: { sku: "UNASSIGNED-001", name: "Blocked Product", branchId: branchB, price: "10.00", taxRate: "0" },
+  });
+  assert.equal(managerProductOnUnassignedBranch.statusCode, 403, managerProductOnUnassignedBranch.body);
 });
