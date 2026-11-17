@@ -3,3 +3,74 @@
 .track-button{border:1px solid #9aaf91;background:#f7fbf2;color:#36553a;padding:10px 14px;font:700 11px 'DM Sans';cursor:pointer;border-radius:3px}.tracking-status{font:11px 'DM Mono';color:#4e6d4c}
 .pay-button{display:block;width:100%;margin-top:9px;border:0;background:var(--store-color);color:#17231d;padding:12px 15px;font:800 11px 'DM Sans';cursor:pointer;border-radius:3px}.pay-button:disabled{opacity:.5;cursor:wait}
 .delivery-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.delivery-grid label{min-width:0}@media(max-width:560px){.delivery-grid{grid-template-columns:1fr}}
+
+
+/* USMS premium storefront foundation — merchant accent remains configurable */
+:root{color-scheme:dark}
+.store-shell{
+  --store-ink:#0B0B0C;
+  --store-panel:#141416;
+  --store-panel-raised:#1B1B1E;
+  --store-text:#FFFFFF;
+  --store-muted:#A1A1AA;
+  --store-border:#2B2B30;
+  color:var(--store-text);
+  background:var(--store-ink);
+}
+.store-header{border-bottom-color:var(--store-border)}
+.store-brand{color:var(--store-text)}
+.store-mark{background:var(--store-panel-raised);color:var(--store-color)}
+.store-header-right{color:var(--store-muted)}
+.live-dot{background:var(--store-color);box-shadow:0 0 0 4px color-mix(in srgb,var(--store-color) 16%,transparent)}
+.cart-pill{border-color:var(--store-border);color:var(--store-text);background:var(--store-panel)}
+.cart-pill:hover{border-color:var(--store-color);color:var(--store-color)}
+.store-hero{border-bottom-color:var(--store-border);background:radial-gradient(ellipse at 76% 46%,#22251a 0%,#111113 42%,#0B0B0C 76%)}
+.store-eyebrow{color:var(--store-color)}
+.hero-copy h1{color:var(--store-text)}
+.hero-copy p,.checkout-section>div>p{color:#B2B2BA}
+.store-cta{background:var(--store-color);color:#0B0B0C;border-radius:5px;transition:transform .18s ease,filter .18s ease}
+.store-cta:hover{transform:translateY(-2px);filter:brightness(1.06)}
+.hero-orbit{border-color:#3A3A3E}
+.hero-bag{background:var(--store-color);color:#0B0B0C;box-shadow:20px 25px 0 #242426}
+.hero-sticker{background:var(--store-panel-raised);border:1px solid var(--store-border);color:var(--store-color)}
+.hero-foot{color:#85858D}
+.catalog-section{background:var(--store-ink)}
+.section-head h2,.checkout-section h2{color:var(--store-text)}
+.product-count{color:var(--store-muted)}
+.product-card{background:var(--store-panel);border-color:var(--store-border);border-radius:9px;padding:10px 10px 15px;transition:transform .2s ease,border-color .2s ease}
+.product-card:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--store-color) 55%,var(--store-border))}
+.product-visual,.visual-1,.visual-2,.visual-3{background:#202024;border-radius:5px}
+.product-number{color:#A1A1AA}
+.product-glyph,.visual-1 .product-glyph,.visual-2 .product-glyph,.visual-3 .product-glyph{color:var(--store-color)}
+.stock-tag{background:#0B0B0CE8;color:#D4D4D8;border:1px solid var(--store-border);border-radius:3px}
+.product-info h3{color:var(--store-text)}
+.product-info p{color:var(--store-muted)}
+.product-info strong{color:var(--store-color)}
+.add-button{border-color:var(--store-border);color:var(--store-text);border-radius:4px}
+.add-button:hover:not(:disabled){background:var(--store-color);border-color:var(--store-color);color:#0B0B0C}
+.quantity-control button{border-color:var(--store-border);color:var(--store-text);background:var(--store-panel)}
+.quantity-control button:hover{border-color:var(--store-color);color:var(--store-color)}
+.quantity-control b{color:var(--store-text)}
+.state-message{color:var(--store-muted)}
+.state-message.error,.inline-error{color:#FF9E91}
+.checkout-section{border-top-color:var(--store-border);border-bottom-color:var(--store-border);background:#101012}
+.checkout-card{background:var(--store-panel);border-color:var(--store-border);border-radius:9px;color:var(--store-text)}
+.checkout-row{border-bottom-color:var(--store-border);color:#D4D4D8}
+.cart-line{color:#B2B2BA}
+.empty-cart{color:var(--store-muted)}
+.checkout-card label{color:#B2B2BA}
+.checkout-card input{background:#0B0B0C;border-color:var(--store-border);border-radius:4px;color:var(--store-text)}
+.checkout-card input::placeholder{color:#777780}
+.checkout-card input:focus{border-color:var(--store-color)}
+.checkout-button,.order-success button{background:var(--store-color);color:#0B0B0C;border-radius:4px;transition:filter .18s ease}
+.checkout-button:hover:not(:disabled),.order-success button:hover{filter:brightness(1.08)}
+.checkout-card small{color:var(--store-muted)}
+.order-success{background:#1B2411;border-left-color:var(--store-color);color:var(--store-text)}
+.order-success h2{color:var(--store-color)}
+.track-button{border-color:var(--store-border);background:var(--store-panel-raised);color:var(--store-color);border-radius:4px}
+.tracking-status{color:var(--store-color)}
+.pay-button{background:var(--store-color);color:#0B0B0C;border-radius:4px}
+.store-footer{border-top:1px solid var(--store-border);color:var(--store-muted)}
+.store-footer a{color:var(--store-color)}
+.delivery-grid label{color:#B2B2BA}
+@media(prefers-reduced-motion:reduce){.product-card,.store-cta{transition:none}.product-card:hover,.store-cta:hover{transform:none}}
