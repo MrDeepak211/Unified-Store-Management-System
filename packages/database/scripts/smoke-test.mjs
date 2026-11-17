@@ -21,6 +21,38 @@ try {
   await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON tenants, branches, products, inventory_balances,
     inventory_movements, sales_orders, sales_order_items, tenant_memberships, storefront_settings TO usms_runtime_test`);
 
+  // Every tenant-owned table must enable RLS and define at least one policy.
+  // This catalog guard automatically covers tables added by future migrations.
+  const rlsCoverage = await client.query(`
+    SELECT c.relname AS table_name,
+           c.relrowsecurity AS rls_enabled,
+           EXISTS (
+             SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid
+           ) AS has_policy
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relkind = 'r'
+      AND c.relname <> 'tenants'
+      AND EXISTS (
+        SELECT 1 FROM pg_attribute a
+        WHERE a.attrelid = c.oid
+          AND a.attname = 'tenant_id'
+          AND a.attnum > 0
+          AND NOT a.attisdropped
+      )
+    ORDER BY c.relname
+  `);
+  const unprotectedTables = rlsCoverage.rows
+    .filter((row) => !row.rls_enabled || !row.has_policy)
+    .map((row) => row.table_name);
+  if (unprotectedTables.length) {
+    throw new Error(`Tenant tables missing RLS or policies: ${unprotectedTables.join(", ")}`);
+  }
+  if (!rlsCoverage.rowCount) {
+    throw new Error("RLS coverage check found no tenant-owned tables.");
+  }
+
   await client.query("BEGIN");
   await client.query("INSERT INTO tenants (id, name, slug) VALUES ($1, 'Smoke A', $2), ($3, 'Smoke B', $4)", [tenantA, `smoke-a-${tenantA.slice(0,8)}`, tenantB, `smoke-b-${tenantB.slice(0,8)}`]);
   await client.query("INSERT INTO branches (id, tenant_id, name, code, is_default) VALUES ($1,$2,'Main','MAIN',true),($3,$4,'Main','MAIN',true)", [branchA,tenantA,branchB,tenantB]);
