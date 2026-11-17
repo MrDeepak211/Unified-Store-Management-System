@@ -31,3 +31,16 @@ Supporting neutrals are allowed for hierarchy:
 ## Reference
 
 The founder supplied a visual reference showing three swatches: Midnight Black `#0B0B0C`, Pure White `#FFFFFF`, and Lime Green `#C6F432`. This is the approved starting palette for the USMS Business App.
+
+
+## Storefront application
+
+The customer-facing Storefront uses the same premium Midnight foundation for its neutral surfaces, typography and structure, while retaining each merchant's configured `primaryColor` as the live accent through the `--store-color` CSS variable.
+
+- Midnight Black `#0B0B0C` is the page canvas.
+- Raised dark surfaces and subtle borders define product cards and checkout panels.
+- White is used for product names and high-priority content; muted grey is used for descriptions and supporting metadata.
+- Merchant-configured accent colour is used for primary calls to action, stock highlights, selected states and checkout/payment actions.
+- Do not hard-code Lime Green as the public storefront's only accent; the default fallback may use the approved Lime Green, but each shop's own brand colour takes precedence.
+- Product cards and controls must remain legible on mobile, with visible focus states and reduced-motion support.
+- Business App remains USMS-branded in Midnight/Lime. Printed invoices remain white and print-friendly.
