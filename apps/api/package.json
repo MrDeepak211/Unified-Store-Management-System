@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "worker:reservations": "tsx src/workers/reservationExpiry.ts",
     "test:auth": "tsx --test src/auth.test.ts",
-    "test:api": "tsx --test src/app.test.ts"
+    "test:api": "tsx --test src/app.test.ts",
+    "test:auth-integration": "tsx --test src/auth.integration.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
