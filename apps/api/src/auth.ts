@@ -31,13 +31,24 @@ export async function verifyAccessToken(token: string): Promise<JWTPayload> {
   return payload;
 }
 
+export function isTenantId(value: unknown): value is string {
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+export function assertRoleAccess(role: TenantActor["role"], allowedRoles?: TenantActor["role"][]) {
+  if (allowedRoles && !allowedRoles.includes(role)) {
+    throw Object.assign(new Error("Your role does not allow this action."), { statusCode: 403 });
+  }
+}
+
 export async function requireTenantActor(
   request: FastifyRequest,
   allowedRoles?: TenantActor["role"][],
 ): Promise<TenantActor> {
   const authorization = request.headers.authorization;
   const tenantId = request.headers["x-usms-tenant"];
-  if (!authorization?.startsWith("Bearer ") || typeof tenantId !== "string") {
+  if (!authorization?.startsWith("Bearer ") || !isTenantId(tenantId)) {
     throw Object.assign(new Error("Sign in and select a shop to continue."), { statusCode: 401 });
   }
 
@@ -67,9 +78,7 @@ export async function requireTenantActor(
   });
 
   if (!actor) throw Object.assign(new Error("You do not have access to this shop."), { statusCode: 403 });
-  if (allowedRoles && !allowedRoles.includes(actor.role)) {
-    throw Object.assign(new Error("Your role does not allow this action."), { statusCode: 403 });
-  }
+  assertRoleAccess(actor.role, allowedRoles);
   return actor;
 }
 
