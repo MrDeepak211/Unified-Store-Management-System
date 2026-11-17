@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { after, before, test } from "node:test";
 import { randomUUID } from "node:crypto";
-import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { exportJWK, generateKeyPair, SignJWT, type KeyLike } from "jose";
 import { buildApp } from "./app.js";
 import { closePool, getPool } from "./db.js";
 
@@ -22,7 +22,7 @@ let cashierToken = "";
 let inactiveToken = "";
 let app: Awaited<ReturnType<typeof buildApp>>;
 
-async function sign(subject: string, privateKey: CryptoKey | unknown, kid: string) {
+async function sign(subject: string, privateKey: KeyLike, kid: string) {
   return new SignJWT({ email: `${subject}@usms.test` })
     .setProtectedHeader({ alg: "ES256", kid, typ: "JWT" })
     .setSubject(subject)
