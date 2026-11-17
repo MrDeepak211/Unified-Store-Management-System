@@ -40,6 +40,8 @@ jobs:
         run: pnpm db:migrate
       - name: Test tenant isolation and stock invariants
         run: pnpm --filter @usms/database smoke
+      - name: Test API authorization guards
+        run: pnpm --filter @usms/api test:auth
       - name: Typecheck
         run: pnpm typecheck
       - name: Build
