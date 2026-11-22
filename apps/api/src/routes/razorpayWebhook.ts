@@ -4,12 +4,13 @@ import { decryptPaymentSecret } from "../paymentCrypto.js";
 import { getPool, withTenantTransaction } from "../db.js";
 import { notifyInventoryChanged } from "./inventoryEvents.js";
 import { issueSalesInvoice } from "../invoices.js";
+import { classifyRefundAmount, shouldRestockAfterFullRefund } from "./refundPolicy.js";
 
 type RazorpayWebhook = {
   event?: string;
   payload?: {
     payment?: { entity?: { id?: string; order_id?: string; amount?: number; currency?: string } };
-    refund?: { entity?: { id?: string; payment_id?: string; status?: string } };
+    refund?: { entity?: { id?: string; payment_id?: string; status?: string; amount?: number } };
   };
 };
 
@@ -160,29 +161,85 @@ export async function registerRazorpayWebhookRoutes(app: FastifyInstance) {
         );
       } else if (eventType === "refund.processed" && refundEntity?.payment_id) {
         const payment = await client.query(
-          "SELECT sales_order_id FROM payments WHERE tenant_id = $1 AND provider = 'razorpay' AND provider_payment_id = $2",
+          `SELECT sales_order_id, amount_paise, status
+           FROM payments
+           WHERE tenant_id = $1 AND provider = 'razorpay' AND provider_payment_id = $2`,
           [tenantId, refundEntity.payment_id],
         );
         if (payment.rowCount) {
-          const order = await client.query("SELECT id, branch_id, status FROM sales_orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE", [tenantId, payment.rows[0].sales_order_id]);
-          if (order.rowCount && order.rows[0].status === "confirmed") {
-            const items = await client.query("SELECT product_id, quantity FROM sales_order_items WHERE tenant_id = $1 AND order_id = $2", [tenantId, order.rows[0].id]);
-            for (const item of items.rows) {
+          const refundDecision = classifyRefundAmount(refundEntity.amount, Number(payment.rows[0].amount_paise));
+          if (refundDecision === "partial") {
+            // Partial money refunds do not prove that goods were physically returned.
+            // Keep the payment/order state unchanged for manual reconciliation.
+            request.log.warn({
+              tenantId,
+              paymentId: refundEntity.payment_id,
+              refundId: refundEntity.id,
+              refundAmountPaise: refundEntity.amount,
+              paymentAmountPaise: Number(payment.rows[0].amount_paise),
+            }, "Partial Razorpay refund received; automatic inventory restock and full-refund transition skipped");
+          } else if (refundDecision === "invalid") {
+            request.log.error({
+              tenantId,
+              paymentId: refundEntity.payment_id,
+              refundId: refundEntity.id,
+              refundAmountPaise: refundEntity.amount,
+              paymentAmountPaise: Number(payment.rows[0].amount_paise),
+            }, "Razorpay refund amount is missing or inconsistent; manual reconciliation required");
+          } else if (payment.rows[0].status === "captured") {
+            // Match the payment lifecycle's order-first lock order and make repeated refund
+            // events harmless. A fulfilled sale is never restocked by a payment refund alone.
+            const order = await client.query(
+              "SELECT id, branch_id, status FROM sales_orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
+              [tenantId, payment.rows[0].sales_order_id],
+            );
+            const lockedPayment = await client.query(
+              "SELECT id, status FROM payments WHERE tenant_id = $1 AND provider = 'razorpay' AND provider_payment_id = $2 FOR UPDATE",
+              [tenantId, refundEntity.payment_id],
+            );
+            // Another distinct webhook may have settled this same refund while we waited
+            // for the order lock. Re-check the locked row before touching stock.
+            if (order.rowCount && lockedPayment.rowCount && lockedPayment.rows[0].status === "captured") {
+              if (shouldRestockAfterFullRefund(order.rows[0].status)) {
+                const items = await client.query(
+                  "SELECT product_id, quantity FROM sales_order_items WHERE tenant_id = $1 AND order_id = $2",
+                  [tenantId, order.rows[0].id],
+                );
+                for (const item of items.rows) {
+                  await client.query(
+                    `UPDATE inventory_balances SET on_hand = on_hand + $4, updated_at = now()
+                     WHERE tenant_id = $1 AND branch_id = $2 AND product_id = $3`,
+                    [tenantId, order.rows[0].branch_id, item.product_id, item.quantity],
+                  );
+                  await client.query(
+                    `INSERT INTO inventory_movements (tenant_id, branch_id, product_id, movement_type, quantity_delta, reference_type, reference_id, idempotency_key, notes)
+                     VALUES ($1, $2, $3, 'return', $4, 'sales_order', $5, $6, 'Automatic restock after full refund of unfulfilled order')
+                     ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`,
+                    [tenantId, order.rows[0].branch_id, item.product_id, item.quantity, order.rows[0].id, `refund:${refundEntity.id ?? refundEntity.payment_id}:restock:${item.product_id}`],
+                  );
+                }
+                await notifyInventoryChanged(client, {
+                  tenantId,
+                  branchId: order.rows[0].branch_id,
+                  productIds: items.rows.map((item) => item.product_id as string),
+                });
+                await client.query(
+                  "UPDATE sales_orders SET status = 'refunded', payment_status = 'refunded' WHERE tenant_id = $1 AND id = $2",
+                  [tenantId, order.rows[0].id],
+                );
+              } else {
+                // Money was refunded after fulfilment; preserve the fulfilment and stock ledger.
+                await client.query(
+                  "UPDATE sales_orders SET payment_status = 'refunded' WHERE tenant_id = $1 AND id = $2",
+                  [tenantId, order.rows[0].id],
+                );
+              }
               await client.query(
-                `UPDATE inventory_balances SET on_hand = on_hand + $4, updated_at = now()
-                 WHERE tenant_id = $1 AND branch_id = $2 AND product_id = $3`,
-                [tenantId, order.rows[0].branch_id, item.product_id, item.quantity],
-              );
-              await client.query(
-                `INSERT INTO inventory_movements (tenant_id, branch_id, product_id, movement_type, quantity_delta, reference_type, reference_id, idempotency_key, notes)
-                 VALUES ($1, $2, $3, 'return', $4, 'sales_order', $5, $6, 'Automatic restock after refund of unfulfilled order')`,
-                [tenantId, order.rows[0].branch_id, item.product_id, item.quantity, order.rows[0].id, `refund:${refundEntity.id ?? refundEntity.payment_id}:restock:${item.product_id}`],
+                "UPDATE payments SET status = 'refunded', updated_at = now() WHERE tenant_id = $1 AND provider_payment_id = $2",
+                [tenantId, refundEntity.payment_id],
               );
             }
-            await notifyInventoryChanged(client, { tenantId, branchId: order.rows[0].branch_id, productIds: items.rows.map((item) => item.product_id as string) });
           }
-          await client.query("UPDATE payments SET status = 'refunded', updated_at = now() WHERE tenant_id = $1 AND provider_payment_id = $2", [tenantId, refundEntity.payment_id]);
-          await client.query("UPDATE sales_orders SET status = 'refunded', payment_status = 'refunded' WHERE tenant_id = $1 AND id = $2", [tenantId, payment.rows[0].sales_order_id]);
         }
       }
       await client.query("UPDATE payment_webhook_events SET processed_at = now() WHERE tenant_id = $1 AND provider = 'razorpay' AND provider_event_id = $2", [tenantId, typeof request.headers["x-razorpay-event-id"] === "string" ? request.headers["x-razorpay-event-id"] : createHash("sha256").update(raw).digest("hex")]);

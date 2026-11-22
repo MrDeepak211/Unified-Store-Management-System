@@ -81,32 +81,34 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
     }
     const tokenHash = createHash("sha256").update(token).digest("hex");
     const client = await getPool().connect();
-    let tenantId: string;
-    let order: { id: string; orderNumber: string; grandTotal: string; reservationExpiresAt: Date };
-    let keyId: string;
-    let keySecret: string;
     try {
       await client.query("BEGIN");
       const tenant = await client.query("SELECT id FROM tenants WHERE slug = $1 AND status = 'active' LIMIT 1", [request.params.slug.toLowerCase()]);
-      tenantId = tenant.rows[0]?.id as string;
+      const tenantId = tenant.rows[0]?.id as string | undefined;
       if (!tenantId) {
         await client.query("ROLLBACK");
         return reply.code(404).send({ error: { code: "STORE_NOT_FOUND", message: "Store not found." } });
       }
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+
+      // Lock the order before reading/creating its provider order. Every checkout retry for
+      // this USMS order now serializes on the same row, so only one Razorpay order is created.
       const result = await client.query(
-        `SELECT id, order_number AS "orderNumber", grand_total::text AS "grandTotal",
-                reservation_expires_at AS "reservationExpiresAt"
-         FROM sales_orders WHERE tenant_id = $1 AND id = $2 AND public_tracking_token_hash = $3
+        `SELECT id, order_number AS "orderNumber", grand_total::text AS "grandTotal"
+         FROM sales_orders
+         WHERE tenant_id = $1 AND id = $2 AND public_tracking_token_hash = $3
            AND channel = 'online' AND status = 'pending' AND payment_status = 'pending'
-           AND reservation_expires_at > now() LIMIT 1`,
+           AND reservation_expires_at > now()
+         FOR UPDATE`,
         [tenantId, request.params.orderId, tokenHash],
       );
       if (!result.rowCount) {
         await client.query("ROLLBACK");
         return reply.code(409).send({ error: { code: "ORDER_NOT_PAYABLE", message: "Order is expired, already paid or unavailable." } });
       }
-      order = result.rows[0];
+      const order = result.rows[0] as { id: string; orderNumber: string; grandTotal: string };
+      const amount = amountToPaise(order.grandTotal);
+
       const gateway = await client.query(
         "SELECT key_id, key_secret_ciphertext, is_enabled FROM payment_gateway_accounts WHERE tenant_id = $1 AND provider = 'razorpay' LIMIT 1",
         [tenantId],
@@ -115,19 +117,70 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
         await client.query("ROLLBACK");
         return reply.code(503).send({ error: { code: "PAYMENTS_NOT_CONFIGURED", message: "This store has not connected its payment account." } });
       }
-      keyId = gateway.rows[0].key_id as string;
-      keySecret = decryptPaymentSecret(gateway.rows[0].key_secret_ciphertext as string);
+      const keyId = gateway.rows[0].key_id as string;
+      const keySecret = decryptPaymentSecret(gateway.rows[0].key_secret_ciphertext as string);
+
       const existingPayment = await client.query(
-        "SELECT provider_order_id, amount_paise FROM payments WHERE tenant_id = $1 AND sales_order_id = $2 AND provider = 'razorpay' LIMIT 1",
+        "SELECT provider_order_id, amount_paise FROM payments WHERE tenant_id = $1 AND sales_order_id = $2 AND provider = 'razorpay' FOR UPDATE",
         [tenantId, order.id],
       );
       if (existingPayment.rowCount && existingPayment.rows[0].provider_order_id) {
+        if (Number(existingPayment.rows[0].amount_paise) !== amount) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({ error: { code: "PAYMENT_AMOUNT_CHANGED", message: "The order total changed. Please restart checkout." } });
+        }
         await client.query("COMMIT");
-        return reply.send({ payment: { provider: "razorpay", keyId, orderId: existingPayment.rows[0].provider_order_id, amount: Number(existingPayment.rows[0].amount_paise), currency: "INR" } });
+        return reply.send({ payment: { provider: "razorpay", keyId, orderId: existingPayment.rows[0].provider_order_id, amount, currency: "INR" } });
       }
+
+      // Keep the order lock until the provider order is persisted. Bound the network wait so
+      // checkout retries cannot pile up behind a stalled payment-provider request indefinitely.
+      let response: Response;
+      try {
+        response = await fetch("https://api.razorpay.com/v1/orders", {
+          method: "POST",
+          headers: { Authorization: basicAuth(keyId, keySecret), "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amount,
+            currency: "INR",
+            receipt: `USMS-${order.id.replace(/-/g, "").slice(0, 24)}`,
+            notes: { usms_order_id: order.id, usms_tenant_id: tenantId },
+          }),
+          signal: AbortSignal.timeout(10_000),
+        });
+      } catch (error) {
+        request.log.warn({ err: error, orderId: order.id }, "Razorpay order creation request failed or timed out");
+        await client.query("ROLLBACK");
+        return reply.code(502).send({ error: { code: "PAYMENT_PROVIDER_UNAVAILABLE", message: "Payment provider is temporarily unavailable. Please retry checkout." } });
+      }
+
+      let gatewayOrder: { id?: string; amount?: number; currency?: string; error?: { description?: string } };
+      try {
+        gatewayOrder = await response.json() as typeof gatewayOrder;
+      } catch {
+        gatewayOrder = {};
+      }
+      if (!response.ok || !gatewayOrder.id || gatewayOrder.amount !== amount || gatewayOrder.currency !== "INR") {
+        request.log.error({ status: response.status, error: gatewayOrder.error?.description }, "Razorpay order creation failed");
+        await client.query("ROLLBACK");
+        return reply.code(502).send({ error: { code: "PAYMENT_ORDER_FAILED", message: "Payment provider could not start checkout. Your stock reservation will expire automatically." } });
+      }
+
+      await client.query(
+        `INSERT INTO payments (tenant_id, sales_order_id, provider, provider_order_id, amount_paise, currency, status, idempotency_key)
+         VALUES ($1, $2, 'razorpay', $3, $4, 'INR', 'created', $5)
+         ON CONFLICT (tenant_id, sales_order_id) DO UPDATE SET
+           provider_order_id = EXCLUDED.provider_order_id,
+           amount_paise = EXCLUDED.amount_paise,
+           currency = EXCLUDED.currency,
+           status = 'created',
+           updated_at = now()`,
+        [tenantId, order.id, gatewayOrder.id, amount, `razorpay-order:${order.id}`],
+      );
       await client.query("COMMIT");
+      return { payment: { provider: "razorpay", keyId, orderId: gatewayOrder.id, amount, currency: "INR" } };
     } catch (error) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => undefined);
       if (error instanceof Error && error.message.includes("PAYMENT_ENCRYPTION_KEY")) {
         return reply.code(503).send({ error: { code: "PAYMENT_ENCRYPTION_NOT_CONFIGURED", message: "Payment encryption is not configured." } });
       }
@@ -135,28 +188,6 @@ export async function registerPaymentRoutes(app: FastifyInstance) {
     } finally {
       client.release();
     }
-
-    const amount = amountToPaise(order.grandTotal);
-    const response = await fetch("https://api.razorpay.com/v1/orders", {
-      method: "POST",
-      headers: { Authorization: basicAuth(keyId!, keySecret!), "Content-Type": "application/json" },
-      body: JSON.stringify({ amount, currency: "INR", receipt: `${order.orderNumber}-${randomUUID().slice(0, 6)}`, notes: { usms_order_id: order.id, usms_tenant_id: tenantId! } }),
-    });
-    const gatewayOrder = await response.json() as { id?: string; amount?: number; currency?: string; status?: string; error?: { description?: string } };
-    if (!response.ok || !gatewayOrder.id || gatewayOrder.amount !== amount || gatewayOrder.currency !== "INR") {
-      request.log.error({ status: response.status, error: gatewayOrder.error?.description }, "Razorpay order creation failed");
-      return reply.code(502).send({ error: { code: "PAYMENT_ORDER_FAILED", message: "Payment provider could not start checkout. Your stock reservation will expire automatically." } });
-    }
-    await withTenantTransaction(tenantId!, async (db) => {
-      await db.query(
-        `INSERT INTO payments (tenant_id, sales_order_id, provider, provider_order_id, amount_paise, currency, status, idempotency_key)
-         VALUES ($1, $2, 'razorpay', $3, $4, 'INR', 'created', $5)
-         ON CONFLICT (tenant_id, sales_order_id) DO UPDATE SET provider_order_id = EXCLUDED.provider_order_id,
-           amount_paise = EXCLUDED.amount_paise, status = 'created', updated_at = now()`,
-        [tenantId, order.id, gatewayOrder.id, amount, `razorpay-order:${order.id}`],
-      );
-    });
-    return { payment: { provider: "razorpay", keyId: keyId!, orderId: gatewayOrder.id, amount, currency: "INR" } };
   });
 
   app.post<{ Params: { slug: string; orderId: string }; Body: VerifyPaymentBody }>("/api/v1/storefront/:slug/orders/:orderId/verify-payment", async (request, reply) => {
