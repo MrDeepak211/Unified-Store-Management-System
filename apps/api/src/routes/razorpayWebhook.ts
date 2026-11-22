@@ -193,11 +193,13 @@ export async function registerRazorpayWebhookRoutes(app: FastifyInstance) {
               "SELECT id, branch_id, status FROM sales_orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE",
               [tenantId, payment.rows[0].sales_order_id],
             );
-            await client.query(
-              "SELECT id FROM payments WHERE tenant_id = $1 AND provider = 'razorpay' AND provider_payment_id = $2 FOR UPDATE",
+            const lockedPayment = await client.query(
+              "SELECT id, status FROM payments WHERE tenant_id = $1 AND provider = 'razorpay' AND provider_payment_id = $2 FOR UPDATE",
               [tenantId, refundEntity.payment_id],
             );
-            if (order.rowCount) {
+            // Another distinct webhook may have settled this same refund while we waited
+            // for the order lock. Re-check the locked row before touching stock.
+            if (order.rowCount && lockedPayment.rowCount && lockedPayment.rows[0].status === "captured") {
               if (shouldRestockAfterFullRefund(order.rows[0].status)) {
                 const items = await client.query(
                   "SELECT product_id, quantity FROM sales_order_items WHERE tenant_id = $1 AND order_id = $2",
