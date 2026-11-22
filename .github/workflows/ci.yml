@@ -46,6 +46,8 @@ jobs:
         run: pnpm --filter @usms/api test:api
       - name: Test authenticated tenant and role boundaries
         run: pnpm --filter @usms/api test:auth-integration
+      - name: Test payment refund safety policy
+        run: pnpm --filter @usms/api test:payments
       - name: Typecheck
         run: pnpm typecheck
       - name: Build
