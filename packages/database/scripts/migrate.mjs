@@ -11,9 +11,16 @@ if (!migrationUrl) {
   process.exit(1);
 }
 
+const sslEnabled = process.env.DATABASE_SSL === "true";
+const databaseCaCert = process.env.DATABASE_CA_CERT;
+if (sslEnabled && !databaseCaCert) {
+  console.error("DATABASE_CA_CERT is required when DATABASE_SSL=true. Add the provider CA certificate as a secret.");
+  process.exit(1);
+}
+
 const pool = new Pool({
   connectionString: migrationUrl,
-  ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: true } : undefined,
+  ssl: sslEnabled ? { ca: databaseCaCert, rejectUnauthorized: true } : undefined,
 });
 try {
   await pool.query(`CREATE TABLE IF NOT EXISTS usms_schema_migrations (
