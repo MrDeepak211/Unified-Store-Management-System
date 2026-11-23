@@ -3,7 +3,15 @@ import { randomUUID } from "node:crypto";
 
 const { Pool } = pg;
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required.");
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const sslEnabled = process.env.DATABASE_SSL === "true";
+const databaseCaCert = process.env.DATABASE_CA_CERT;
+if (sslEnabled && !databaseCaCert) {
+  throw new Error("DATABASE_CA_CERT is required when DATABASE_SSL=true.");
+}
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: sslEnabled ? { ca: databaseCaCert, rejectUnauthorized: true } : undefined,
+});
 const client = await pool.connect();
 const tenantA = randomUUID();
 const tenantB = randomUUID();
