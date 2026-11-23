@@ -15,12 +15,17 @@ jobs:
       DATABASE_URL: ${{ secrets.STAGING_MIGRATION_DATABASE_URL }}
       MIGRATION_DATABASE_URL: ${{ secrets.STAGING_MIGRATION_DATABASE_URL }}
       DATABASE_SSL: "true"
+      DATABASE_CA_CERT: ${{ secrets.STAGING_DATABASE_CA_CERT }}
     steps:
       - name: Verify staging database secret is configured
         shell: bash
         run: |
           if [ -z "$MIGRATION_DATABASE_URL" ]; then
             echo "Missing STAGING_MIGRATION_DATABASE_URL in the staging GitHub environment."
+            exit 1
+          fi
+          if [ -z "$DATABASE_CA_CERT" ]; then
+            echo "Missing STAGING_DATABASE_CA_CERT in the staging GitHub environment. Add the Supabase database CA certificate."
             exit 1
           fi
 
