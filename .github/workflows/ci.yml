@@ -36,6 +36,13 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
+      - name: Export generated pnpm lockfile for reproducible installs
+        uses: actions/upload-artifact@v4
+        with:
+          name: usms-pnpm-lockfile
+          path: pnpm-lock.yaml
+          if-no-files-found: error
+          retention-days: 7
       - name: Apply database migrations
         run: pnpm db:migrate
       - name: Test tenant isolation and stock invariants
