@@ -131,10 +131,13 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
       const branch = await client.query("SELECT id FROM branches WHERE tenant_id = $1 AND id = $2", [actor.tenantId, body.branchId]);
       if (!branch.rowCount) throw Object.assign(new Error("Selected branch was not found."), { statusCode: 404 });
       const prior = await client.query(
-        "SELECT id, receipt_number AS \"receiptNumber\", grand_total::text AS \"grandTotal\" FROM purchase_receipts WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1",
+        "SELECT id, receipt_number, grand_total::text, request_hash FROM purchase_receipts WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1",
         [actor.tenantId, key],
       );
-      if (prior.rowCount) { if (prior.rows[0].requestHash !== requestHash) return { conflict: true as const }; return { receipt: prior.rows[0], replayed: true as const }; }
+      if (prior.rowCount) {
+        if (prior.rows[0].request_hash !== requestHash) return { conflict: true as const };
+        return { receipt: { id: prior.rows[0].id, receiptNumber: prior.rows[0].receipt_number, grandTotal: prior.rows[0].grand_total }, replayed: true as const };
+      }
       if (body.supplierId) {
         const supplier = await client.query("SELECT id FROM suppliers WHERE tenant_id = $1 AND id = $2", [actor.tenantId, body.supplierId]);
         if (!supplier.rowCount) throw Object.assign(new Error("Selected supplier was not found."), { statusCode: 404 });
