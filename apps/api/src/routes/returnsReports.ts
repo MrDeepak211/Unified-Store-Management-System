@@ -164,10 +164,15 @@ export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
           [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
         ),
         client.query(
-          `SELECT COALESCE(SUM(grand_total),0)::text AS cash_in
-           FROM sales_orders WHERE tenant_id = $1 AND channel = 'pos' AND payment_status = 'paid' AND payment_method = 'cash'
-             AND ($2::uuid[] IS NULL OR branch_id = ANY($2))
-             AND created_at >= date_trunc('day', now())`,
+          `SELECT (
+             COALESCE((SELECT SUM(o.grand_total) FROM sales_orders o
+               WHERE o.tenant_id = $1 AND o.channel = 'pos' AND o.payment_status = 'paid' AND o.payment_method = 'cash'
+                 AND ($2::uuid[] IS NULL OR o.branch_id = ANY($2)) AND o.created_at >= date_trunc('day', now())), 0)
+             + COALESCE((SELECT SUM(c.amount) FROM pos_credit_collections c
+               JOIN sales_orders o ON o.tenant_id = c.tenant_id AND o.id = c.sales_order_id
+               WHERE c.tenant_id = $1 AND c.payment_method = 'cash'
+                 AND ($2::uuid[] IS NULL OR o.branch_id = ANY($2)) AND c.collected_at >= date_trunc('day', now())), 0)
+           )::text AS cash_in`,
           [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
         ),
       ]);
