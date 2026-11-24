@@ -59,7 +59,10 @@ export default function App() {
   const [newCategoryName, setNewCategoryName] = useState("");
   const [barcodeSearch, setBarcodeSearch] = useState("");
   const [stockProductId, setStockProductId] = useState("");
-  const [stockDelta, setStockDelta] = useState("10");\n  const [stockReason, setStockReason] = useState<"damage" | "shrinkage" | "correction" | "opening_balance" | "found_stock" | "other">("opening_balance");\n  const [stockNote, setStockNote] = useState("");\n  const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>([]);
+  const [stockDelta, setStockDelta] = useState("10");
+  const [stockReason, setStockReason] = useState<"damage" | "shrinkage" | "correction" | "opening_balance" | "found_stock" | "other">("opening_balance");
+  const [stockNote, setStockNote] = useState("");
+  const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>([]);
   const [customers, setCustomers] = useState<Party[]>([]);
   const [suppliers, setSuppliers] = useState<Party[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
@@ -208,9 +211,11 @@ export default function App() {
         api<{ categories: Array<{id:string;name:string}> }>("/api/v1/business/categories", {}, selectedTenant),
         api<{ orders: OnlineOrder[] }>("/api/v1/business/online-orders", {}, selectedTenant),
         api<{ expenses: Expense[] }>("/api/v1/business/expenses", {}, selectedTenant),
-        api<{ receivables: Receivable[]; collectionHistory: CollectionRecord[] }>("/api/v1/business/receivables", {}, selectedTenant),\n        api<{ movements: InventoryMovement[] }>(`/api/v1/business/inventory/movements?branchId=${encodeURIComponent(activeBranchId)}&limit=30`, {}, selectedTenant),
+        api<{ receivables: Receivable[]; collectionHistory: CollectionRecord[] }>("/api/v1/business/receivables", {}, selectedTenant),
+        api<{ movements: InventoryMovement[] }>(`/api/v1/business/inventory/movements?branchId=${encodeURIComponent(activeBranchId)}&limit=30`, {}, selectedTenant),
       ]);
-      setProducts(productData.products);\n      setInventoryMovements(movementData.movements);
+      setProducts(productData.products);
+      setInventoryMovements(movementData.movements);
       setStockProductId((current) => current || productData.products[0]?.id || "");
       setCustomers(customerData.customers);
       setSuppliers(supplierData.suppliers);
@@ -284,7 +289,9 @@ export default function App() {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const frames = buffer.split("\n\n");
+          const frames = buffer.split("
+
+");
           buffer = frames.pop() ?? "";
           if (frames.some((frame) => frame.startsWith("data: "))) void loadBusinessData(tenantId);
         }
