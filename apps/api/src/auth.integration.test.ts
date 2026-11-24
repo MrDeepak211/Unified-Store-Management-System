@@ -98,8 +98,11 @@ after(async () => {
     await pool.query("DELETE FROM inventory_balances WHERE tenant_id = $1", [tenantB]);
     await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantB]);
     await pool.query("DELETE FROM inventory_balances WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = ANY($1::uuid[]))", [[tenantA, tenantB]]);
+    await pool.query("DELETE FROM supplier_payments WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM sales_returns WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM purchase_receipt_items WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM purchase_receipts WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM suppliers WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM inventory_transfers WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM sales_orders WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM tenant_memberships WHERE tenant_id = ANY($1::uuid[])", [[tenantA, tenantB]]);
@@ -344,4 +347,65 @@ test("inventory reconciliation enforces tenant, branch, role, completeness, stal
   assert.equal(finalBalance.rows[0].reserved, 2);
   const audit = await pool.query("SELECT COUNT(*)::int AS count FROM inventory_movements WHERE tenant_id=$1 AND reference_type='inventory_count' AND reference_id=$2", [tenantA, freshId]);
   assert.equal(audit.rows[0].count, 1, "same-key approval replay must not duplicate audit movements");
+});
+
+
+test("supplier payments reconcile partial balances, reject overpayment and replay idempotently", async () => {
+  const pool = getPool();
+  const ownerHeaders = { authorization: `Bearer ${ownerToken}`, "x-usms-tenant": tenantA };
+  const supplierId = randomUUID();
+  const receiptId = randomUUID();
+  await pool.query("INSERT INTO suppliers (id, tenant_id, name) VALUES ($1,$2,'Ledger Test Supplier')", [supplierId, tenantA]);
+  await pool.query(
+    `INSERT INTO purchase_receipts (id, tenant_id, branch_id, supplier_id, receipt_number, status, subtotal, tax_total, grand_total, idempotency_key)
+     VALUES ($1,$2,$3,$4,$5,'received',100,0,100,$6)`,
+    [receiptId, tenantA, branchA, supplierId, `GRN-${receiptId.slice(0,8)}`, `receipt-${receiptId}`],
+  );
+
+  const paymentHeaders = { ...ownerHeaders, "content-type": "application/json", "idempotency-key": "supplier-payment-key-001" };
+  const payment = await app.inject({
+    method: "POST", url: `/api/v1/business/suppliers/${supplierId}/payments`,
+    headers: paymentHeaders,
+    payload: { branchId: branchA, amount: "40.00", paymentMethod: "cash", reference: "Cash voucher 1" },
+  });
+  assert.equal(payment.statusCode, 201, payment.body);
+  assert.equal(payment.json().payment.amount, "40.00");
+
+  const replay = await app.inject({
+    method: "POST", url: `/api/v1/business/suppliers/${supplierId}/payments`,
+    headers: paymentHeaders,
+    payload: { branchId: branchA, amount: "40.00", paymentMethod: "cash", reference: "Cash voucher 1" },
+  });
+  assert.equal(replay.statusCode, 200, replay.body);
+  assert.equal(replay.json().replayed, true);
+
+  const changedReplay = await app.inject({
+    method: "POST", url: `/api/v1/business/suppliers/${supplierId}/payments`,
+    headers: paymentHeaders,
+    payload: { branchId: branchA, amount: "41.00", paymentMethod: "cash", reference: "Cash voucher 1" },
+  });
+  assert.equal(changedReplay.statusCode, 409, changedReplay.body);
+
+  const overpayment = await app.inject({
+    method: "POST", url: `/api/v1/business/suppliers/${supplierId}/payments`,
+    headers: { ...ownerHeaders, "content-type": "application/json", "idempotency-key": "supplier-payment-key-002" },
+    payload: { branchId: branchA, amount: "60.01", paymentMethod: "upi" },
+  });
+  assert.equal(overpayment.statusCode, 409, overpayment.body);
+
+  const statement = await app.inject({
+    method: "GET", url: `/api/v1/business/suppliers/${supplierId}/statement`, headers: ownerHeaders,
+  });
+  assert.equal(statement.statusCode, 200, statement.body);
+  assert.equal(statement.json().summary.totalPurchased, "100.00");
+  assert.equal(statement.json().summary.totalPaid, "40.00");
+  assert.equal(statement.json().summary.outstanding, "60.00");
+  assert.equal(statement.json().entries.length, 2);
+
+  const supplierList = await app.inject({ method: "GET", url: "/api/v1/business/suppliers", headers: ownerHeaders });
+  const supplier = supplierList.json().suppliers.find((row: { id: string }) => row.id === supplierId);
+  assert.equal(supplier.outstanding, "60.00");
+
+  const paymentCount = await pool.query("SELECT COUNT(*)::int AS count FROM supplier_payments WHERE tenant_id=$1 AND supplier_id=$2", [tenantA, supplierId]);
+  assert.equal(paymentCount.rows[0].count, 1, "idempotent replay must not create a duplicate supplier payment");
 });
