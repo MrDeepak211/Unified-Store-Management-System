@@ -97,6 +97,7 @@ after(async () => {
     await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM inventory_balances WHERE tenant_id = $1", [tenantB]);
     await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantB]);
+    await pool.query("DELETE FROM inventory_balances WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = ANY($1::uuid[]))", [[tenantA, tenantB]]);
     await pool.query("DELETE FROM sales_returns WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM purchase_receipts WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM inventory_transfers WHERE tenant_id = $1", [tenantA]);
