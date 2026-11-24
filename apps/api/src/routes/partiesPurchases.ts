@@ -128,7 +128,7 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
       if (typeof key !== "string" || key.length < 8 || key.length > 128) {
         return reply.code(400).send({ error: { code: "IDEMPOTENCY_KEY_REQUIRED", message: "Supplier payment requires an Idempotency-Key header." } });
       }
-      if (!body.branchId || !/^\\d+(?:\\.\\d{1,2})?$/.test(amount) || !Number.isFinite(Number(amount)) ||
+      if (!body.branchId || !/^\d+(?:\.\d{1,2})?$/.test(amount) || !Number.isFinite(Number(amount)) ||
           Number(amount) <= 0 || Number(amount) > 9999999999.99 ||
           !["cash", "upi", "card", "bank_transfer"].includes(body.paymentMethod ?? "") ||
           (reference && reference.length > 120) || (notes && notes.length > 500)) {
