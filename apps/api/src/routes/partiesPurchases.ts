@@ -201,12 +201,15 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
          FROM ledger ORDER BY "createdAt", id`,
         [actor.tenantId, request.params.supplierId, actor.branchIds.length ? actor.branchIds : null],
       );
-      const totals = rows.rows.reduce((acc: { purchased: bigint; paid: bigint }, row: { debit: string; credit: string }) => {
-        acc.purchased += toCents(row.debit); acc.paid += toCents(row.credit); return acc;
-      }, { purchased: 0n, paid: 0n });
+      let purchased = 0n;
+      let paid = 0n;
+      for (const row of rows.rows as Array<{ debit: string; credit: string }>) {
+        purchased += toCents(row.debit);
+        paid += toCents(row.credit);
+      }
       return {
         supplier: supplier.rows[0],
-        summary: { totalPurchased: formatMoney(totals.purchased), totalPaid: formatMoney(totals.paid), outstanding: formatMoney(totals.purchased - totals.paid) },
+        summary: { totalPurchased: formatMoney(purchased), totalPaid: formatMoney(paid), outstanding: formatMoney(purchased - paid) },
         entries: rows.rows,
       };
     });
