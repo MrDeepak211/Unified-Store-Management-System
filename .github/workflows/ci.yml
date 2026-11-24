@@ -59,6 +59,8 @@ jobs:
         run: pnpm --filter @usms/api test:idempotency
       - name: Test POS payment settlement status
         run: pnpm --filter @usms/api test:pos-payment-status
+      - name: Test credit receivable arithmetic
+        run: pnpm --filter @usms/api test:receivables
       - name: Test POS offline queue tenant isolation
         run: pnpm --filter @usms/pos test:offline-queue
       - name: Typecheck
