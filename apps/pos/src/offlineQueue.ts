@@ -1,5 +1,3 @@
-import { canSyncPendingSale } from "./offlineQueuePolicy.js";
-
 export interface PendingSaleEvent { id: string; tenantId?: string; createdAt: string; payload: unknown; status: "pending" | "failed"; lastError?: string }
 const DB_NAME = "usms-pos";
 const STORE_NAME = "pending-sales";
