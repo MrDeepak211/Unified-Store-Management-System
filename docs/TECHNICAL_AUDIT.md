@@ -86,3 +86,18 @@ Still required before production:
 ## Release decision
 
 **Not production-ready yet.** The code-level checkout/refund fixes and CI validation are complete, but no hosted staging migration, deployment, Razorpay test transaction, or production verification is claimed. Do not use real customer or financial data until the remaining release gates are complete.
+
+
+### Credit receivables and collection ledger
+
+Credit POS invoices now remain pending until actual collections settle the balance. A tenant-scoped collection ledger records partial and final payments, with branch access checks, sale-row locking, request-bound idempotency, over-collection rejection, and integer-paise arithmetic. The receivables API exposes outstanding invoices and accepts collection entries; a sale is marked paid only when its outstanding balance reaches zero. Migration: `0018_pos_credit_collections.sql`. [PR #8 — POS credit collections](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/8).
+
+Daily cashbook cash-in now includes cash actually collected against credit POS sales, while unpaid credit invoices remain excluded. Collection amounts are associated with their original sale for branch filtering. [PR #9 — cashbook credit collections](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/9).
+
+Both changes passed the GitHub Actions validation workflow, including PostgreSQL migrations, tenant/stock invariants, API authorization and route tests, authenticated tenant/role checks, refund/idempotency/POS settlement/receivables arithmetic/offline queue tests, typecheck and build. PR #9's workflow completed all 19 named validation steps.
+
+## Additional remaining work — receivables workflow
+
+The receivables backend is implemented, but the cashier-facing receivables screen, customer collection history and printable collection receipt still need implementation and acceptance testing. Route-level integration tests for the new receivables endpoints should be expanded beyond the current pure arithmetic coverage. Payment-method reporting for UPI, card and bank-transfer collections should also be reviewed so cashbook categories reconcile correctly.
+
+The work above is code and disposable-CI verified only. It does not establish hosted staging runtime verification or production readiness. Hosted database/provider integration remains intentionally deferred.
