@@ -90,6 +90,14 @@ after(async () => {
   if (server) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   if (process.env.DATABASE_URL) {
     const pool = getPool();
+    await pool.query("DELETE FROM inventory_count_items WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM inventory_count_sessions WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM inventory_movements WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM inventory_balances WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM inventory_balances WHERE tenant_id = $1", [tenantB]);
+    await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantB]);
+    await pool.query("DELETE FROM inventory_balances WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = ANY($1::uuid[]))", [[tenantA, tenantB]]);
     await pool.query("DELETE FROM sales_returns WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM purchase_receipts WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM inventory_transfers WHERE tenant_id = $1", [tenantA]);
@@ -209,4 +217,131 @@ test("authenticated tenant membership, inactive access, roles and branch scope a
     payload: { branchId: branchC, items: [{ productId: randomUUID(), quantity: 1, unitCost: "10.00" }] },
   });
   assert.equal(replayedPurchase.statusCode, 403, replayedPurchase.body);
+});
+
+
+test("inventory reconciliation enforces tenant, branch, role, completeness, stale-stock and approval replay rules", async () => {
+  const pool = getPool();
+  const ownerHeaders = { authorization: `Bearer ${ownerToken}`, "x-usms-tenant": tenantA };
+  const cashierHeaders = { authorization: `Bearer ${cashierToken}`, "x-usms-tenant": tenantA };
+  const managerHeaders = { authorization: `Bearer ${managerToken}`, "x-usms-tenant": tenantA };
+  const productA = randomUUID();
+  const productB = randomUUID();
+  const foreignProduct = randomUUID();
+  await pool.query(
+    `INSERT INTO products (id, tenant_id, sku, name, price, tax_rate)
+     VALUES ($1,$2,'COUNT-A','Count product A',10,0), ($3,$2,'COUNT-B','Count product B',20,0), ($4,$5,'FOREIGN','Foreign product',5,0)`,
+    [productA, tenantA, productB, foreignProduct, tenantB],
+  );
+  await pool.query(
+    `INSERT INTO inventory_balances (tenant_id, branch_id, product_id, on_hand, reserved)
+     VALUES ($1,$2,$3,10,2), ($1,$2,$4,5,0), ($5,$6,$7,8,0)`,
+    [tenantA, branchA, productA, productB, tenantB, branchB, foreignProduct],
+  );
+
+  const start = await app.inject({
+    method: "POST", url: "/api/v1/business/inventory/count-sessions",
+    headers: { ...managerHeaders, "content-type": "application/json" },
+    payload: { branchId: branchA },
+  });
+  assert.equal(start.statusCode, 201, start.body);
+  const sessionId = start.json().session.id as string;
+  const listed = await app.inject({ method: "GET", url: `/api/v1/business/inventory/count-sessions/${sessionId}`, headers: ownerHeaders });
+  assert.equal(listed.statusCode, 200, listed.body);
+  assert.equal(listed.json().items.length, 2);
+
+  const foreignTenantRead = await app.inject({
+    method: "GET", url: `/api/v1/business/inventory/count-sessions/${sessionId}`,
+    headers: { authorization: `Bearer ${inactiveToken}`, "x-usms-tenant": tenantB },
+  });
+  assert.equal(foreignTenantRead.statusCode, 403, foreignTenantRead.body);
+
+  const restrictedBranchStart = await app.inject({
+    method: "POST", url: "/api/v1/business/inventory/count-sessions",
+    headers: { ...managerHeaders, "content-type": "application/json" },
+    payload: { branchId: branchC },
+  });
+  assert.equal(restrictedBranchStart.statusCode, 403, restrictedBranchStart.body);
+
+  const firstItem = listed.json().items.find((item: { productId: string }) => item.productId === productA);
+  const secondItem = listed.json().items.find((item: { productId: string }) => item.productId === productB);
+  assert.ok(firstItem?.id);
+  assert.ok(secondItem?.id);
+
+  const cashierCanRecord = await app.inject({
+    method: "PATCH", url: `/api/v1/business/inventory/count-sessions/${sessionId}/items/${firstItem.id}`,
+    headers: { ...cashierHeaders, "content-type": "application/json" }, payload: { countedQuantity: 9 },
+  });
+  assert.equal(cashierCanRecord.statusCode, 200, cashierCanRecord.body);
+
+  const cashierCannotApprove = await app.inject({
+    method: "POST", url: `/api/v1/business/inventory/count-sessions/${sessionId}/approve`,
+    headers: { ...cashierHeaders, "idempotency-key": "cashier-count-approval" },
+  });
+  assert.equal(cashierCannotApprove.statusCode, 403, cashierCannotApprove.body);
+
+  const incompleteApproval = await app.inject({
+    method: "POST", url: `/api/v1/business/inventory/count-sessions/${sessionId}/approve`,
+    headers: { ...ownerHeaders, "idempotency-key": "owner-count-incomplete" },
+  });
+  assert.equal(incompleteApproval.statusCode, 409, incompleteApproval.body);
+
+  const invalidCount = await app.inject({
+    method: "PATCH", url: `/api/v1/business/inventory/count-sessions/${sessionId}/items/${secondItem.id}`,
+    headers: { ...managerHeaders, "content-type": "application/json" }, payload: { countedQuantity: -1 },
+  });
+  assert.equal(invalidCount.statusCode, 400, invalidCount.body);
+
+  const secondCount = await app.inject({
+    method: "PATCH", url: `/api/v1/business/inventory/count-sessions/${sessionId}/items/${secondItem.id}`,
+    headers: { ...managerHeaders, "content-type": "application/json" }, payload: { countedQuantity: 5 },
+  });
+  assert.equal(secondCount.statusCode, 200, secondCount.body);
+
+  await pool.query("UPDATE inventory_balances SET on_hand=11 WHERE tenant_id=$1 AND branch_id=$2 AND product_id=$3", [tenantA, branchA, productA]);
+  const staleApproval = await app.inject({
+    method: "POST", url: `/api/v1/business/inventory/count-sessions/${sessionId}/approve`,
+    headers: { ...ownerHeaders, "idempotency-key": "owner-count-stale" },
+  });
+  assert.equal(staleApproval.statusCode, 409, staleApproval.body);
+  const unchangedAfterStale = await pool.query("SELECT on_hand FROM inventory_balances WHERE tenant_id=$1 AND branch_id=$2 AND product_id=$3", [tenantA, branchA, productB]);
+  assert.equal(unchangedAfterStale.rows[0].on_hand, 5, "stale approval must not partially post any product");
+
+  const fresh = await app.inject({
+    method: "POST", url: "/api/v1/business/inventory/count-sessions",
+    headers: { ...ownerHeaders, "content-type": "application/json" }, payload: { branchId: branchA, productIds: [productA] },
+  });
+  assert.equal(fresh.statusCode, 201, fresh.body);
+  const freshId = fresh.json().session.id as string;
+  const freshDetails = await app.inject({ method: "GET", url: `/api/v1/business/inventory/count-sessions/${freshId}`, headers: ownerHeaders });
+  const freshItem = freshDetails.json().items[0];
+  assert.equal(freshItem.expectedQuantity, 11);
+  const recordFresh = await app.inject({
+    method: "PATCH", url: `/api/v1/business/inventory/count-sessions/${freshId}/items/${freshItem.id}`,
+    headers: { ...managerHeaders, "content-type": "application/json" }, payload: { countedQuantity: 7 },
+  });
+  assert.equal(recordFresh.statusCode, 200, recordFresh.body);
+  const approvalKey = "owner-count-approval-key-001";
+  const approval = await app.inject({
+    method: "POST", url: `/api/v1/business/inventory/count-sessions/${freshId}/approve`,
+    headers: { ...ownerHeaders, "idempotency-key": approvalKey },
+  });
+  assert.equal(approval.statusCode, 201, approval.body);
+  assert.equal(approval.json().movementCount, 1);
+  const replay = await app.inject({
+    method: "POST", url: `/api/v1/business/inventory/count-sessions/${freshId}/approve`,
+    headers: { ...ownerHeaders, "idempotency-key": approvalKey },
+  });
+  assert.equal(replay.statusCode, 200, replay.body);
+  assert.equal(replay.json().replayed, true);
+  const differentKey = await app.inject({
+    method: "POST", url: `/api/v1/business/inventory/count-sessions/${freshId}/approve`,
+    headers: { ...ownerHeaders, "idempotency-key": "owner-count-different-key" },
+  });
+  assert.equal(differentKey.statusCode, 409, differentKey.body);
+  const finalBalance = await pool.query("SELECT on_hand, reserved FROM inventory_balances WHERE tenant_id=$1 AND branch_id=$2 AND product_id=$3", [tenantA, branchA, productA]);
+  assert.equal(finalBalance.rows[0].on_hand, 7);
+  assert.equal(finalBalance.rows[0].reserved, 2);
+  const audit = await pool.query("SELECT COUNT(*)::int AS count FROM inventory_movements WHERE tenant_id=$1 AND reference_type='inventory_count' AND reference_id=$2", [tenantA, freshId]);
+  assert.equal(audit.rows[0].count, 1, "same-key approval replay must not duplicate audit movements");
 });
