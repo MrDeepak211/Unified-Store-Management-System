@@ -13,7 +13,8 @@
     "test:api": "tsx --test src/app.test.ts",
     "test:auth-integration": "tsx --test src/auth.integration.test.ts",
     "test:payments": "tsx --test src/routes/refundPolicy.test.ts",
-    "test:idempotency": "tsx --test src/idempotency.test.ts"
+    "test:idempotency": "tsx --test src/idempotency.test.ts",
+    "test:pos-payment-status": "tsx --test src/posPaymentStatus.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
