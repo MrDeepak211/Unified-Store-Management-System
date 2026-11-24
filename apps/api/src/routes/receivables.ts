@@ -42,7 +42,8 @@ export async function registerReceivableRoutes(app: FastifyInstance) {
     const body = request.body ?? {};
     if (typeof key !== "string" || key.length < 8 || key.length > 128) return reply.code(400).send({ error: { code: "IDEMPOTENCY_KEY_REQUIRED", message: "A unique Idempotency-Key is required." } });
     const amount = String(body.amount ?? "");
-    if (!/^\\d+(\\.\\d{1,2})?$/.test(amount) || cents(amount) <= 0n || !["cash","upi","card","bank_transfer"].includes(body.paymentMethod ?? "")) {
+    const paymentMethod = body.paymentMethod;
+    if (!/^\\d+(\\.\\d{1,2})?$/.test(amount) || cents(amount) <= 0n || !paymentMethod || !["cash","upi","card","bank_transfer"].includes(paymentMethod)) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Enter a positive amount and a valid collection method." } });
     }
     const reference = body.reference?.trim().slice(0, 120) || null;
@@ -50,7 +51,7 @@ export async function registerReceivableRoutes(app: FastifyInstance) {
     const result = await withTenantTransaction(actor.tenantId, async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
       const sale = await client.query(
-        `SELECT id, branch_id, channel, payment_method, grand_total::text AS "grandTotal", payment_status AS "paymentStatus"
+        `SELECT id, branch_id, channel, status, payment_method, grand_total::text AS "grandTotal", payment_status AS "paymentStatus"
          FROM sales_orders WHERE tenant_id = $1 AND id = $2 FOR UPDATE`,
         [actor.tenantId, request.params.saleId],
       );
@@ -73,7 +74,7 @@ export async function registerReceivableRoutes(app: FastifyInstance) {
       const inserted = await client.query(
         `INSERT INTO pos_credit_collections (tenant_id, sales_order_id, amount, payment_method, reference, idempotency_key, request_hash)
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-        [actor.tenantId, request.params.saleId, money(received), body.paymentMethod, reference, key, requestHash],
+        [actor.tenantId, request.params.saleId, money(received), paymentMethod, reference, key, requestHash],
       );
       const collected = alreadyCollected + received;
       const outstanding = total - collected;
