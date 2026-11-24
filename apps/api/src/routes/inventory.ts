@@ -12,6 +12,38 @@ type AdjustmentBody = {
   delta?: number;
   reason?: AdjustmentReason;
   note?: string;
+  app.get<{ Querystring: { branchId?: string; productId?: string; limit?: string } }>("/api/v1/business/inventory/movements", async (request, reply) => {
+    const actor = await requireTenantActor(request);
+    const branchId = request.query.branchId;
+    const productId = request.query.productId;
+    const requestedLimit = Number(request.query.limit ?? 50);
+    const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 50;
+    if (branchId) assertBranchAccess(actor, branchId);
+    const result = await withTenantTransaction(actor.tenantId, async (client) => {
+      const rows = await client.query(
+        `SELECT m.id, m.branch_id AS "branchId", b.name AS "branchName",
+                m.product_id AS "productId", p.name AS "productName", p.sku,
+                m.movement_type AS "movementType", m.quantity_delta AS "quantityDelta",
+                m.adjustment_reason AS "reason", m.notes AS "note",
+                m.quantity_before AS "quantityBefore", m.quantity_after AS "quantityAfter",
+                m.actor_subject AS "actorSubject", m.reference_type AS "referenceType",
+                m.created_at AS "createdAt"
+         FROM inventory_movements m
+         JOIN branches b ON b.tenant_id = m.tenant_id AND b.id = m.branch_id
+         JOIN products p ON p.tenant_id = m.tenant_id AND p.id = m.product_id
+         WHERE m.tenant_id = $1
+           AND ($2::uuid IS NULL OR m.branch_id = $2)
+           AND ($3::uuid IS NULL OR m.product_id = $3)
+           AND (cardinality($4::uuid[]) = 0 OR m.branch_id = ANY($4::uuid[]))
+         ORDER BY m.created_at DESC, m.id DESC
+         LIMIT $5`,
+        [actor.tenantId, branchId ?? null, productId ?? null, actor.branchIds, limit],
+      );
+      return rows.rows;
+    });
+    return reply.send({ movements: result });
+  });
+
 };
 
 export async function registerInventoryRoutes(app: FastifyInstance) {
