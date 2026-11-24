@@ -293,7 +293,7 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
       if (!["payment", "credit_note"].includes(body.sourceType ?? "") || !body.sourceId ||
           !Array.isArray(body.allocations) || body.allocations.length < 1 || body.allocations.length > 100 ||
           new Set(body.allocations.map((item) => item.receiptId)).size !== body.allocations.length ||
-          body.allocations.some((item) => !item.receiptId || !/^\\d+(?:\\.\\d{1,2})?$/.test(String(item.amount)) || Number(item.amount) <= 0)) {
+          body.allocations.some((item) => !item.receiptId || !/^\d+(?:\.\d{1,2})?$/.test(String(item.amount)) || Number(item.amount) <= 0)) {
         return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Provide a payment or credit note and unique receipts with positive allocation amounts." } });
       }
       const normalized = [...body.allocations].map((item) => ({ receiptId: item.receiptId, amount: String(item.amount) })).sort((a,b) => a.receiptId.localeCompare(b.receiptId));
