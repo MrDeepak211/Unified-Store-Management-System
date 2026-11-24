@@ -11,7 +11,7 @@ ALTER TABLE inventory_movements
 ALTER TABLE inventory_movements
   ADD CONSTRAINT inventory_movements_adjustment_audit_check
   CHECK (
-    movement_type <> 'adjustment'
+    movement_type <> 'adjustment' OR request_hash IS NULL
     OR (
       adjustment_reason IS NOT NULL
       AND adjustment_reason IN ('damage','shrinkage','correction','opening_balance','found_stock','other')
