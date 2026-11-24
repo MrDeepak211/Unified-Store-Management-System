@@ -78,8 +78,18 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
     const actor = await requireTenantActor(request);
     return withTenantTransaction(actor.tenantId, async (client) => {
       const result = await client.query(
-        `SELECT id, name, phone, email, gstin, address, created_at AS "createdAt"
-         FROM suppliers WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 500`,
+        `SELECT s.id, s.name, s.phone, s.email, s.gstin, s.address, s.created_at AS "createdAt",
+                COALESCE((SELECT SUM(r.grand_total) FROM purchase_receipts r
+                  WHERE r.tenant_id=s.tenant_id AND r.supplier_id=s.id AND r.status='received'),0)::text AS "totalPurchased",
+                COALESCE((SELECT SUM(p.amount) FROM supplier_payments p
+                  WHERE p.tenant_id=s.tenant_id AND p.supplier_id=s.id),0)::text AS "totalPaid",
+                GREATEST(
+                  COALESCE((SELECT SUM(r.grand_total) FROM purchase_receipts r
+                    WHERE r.tenant_id=s.tenant_id AND r.supplier_id=s.id AND r.status='received'),0)
+                  - COALESCE((SELECT SUM(p.amount) FROM supplier_payments p
+                    WHERE p.tenant_id=s.tenant_id AND p.supplier_id=s.id),0),0
+                )::text AS "outstanding"
+         FROM suppliers s WHERE s.tenant_id = $1 ORDER BY s.created_at DESC LIMIT 500`,
         [actor.tenantId],
       );
       return { suppliers: result.rows };
@@ -103,6 +113,101 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
       return result.rows[0];
     });
     return reply.code(201).send({ supplier });
+  });
+
+  app.post<{ Params: { supplierId: string }; Body: { branchId?: string; amount?: string | number; paymentMethod?: "cash" | "upi" | "card" | "bank_transfer"; reference?: string; notes?: string } }>(
+    "/api/v1/business/suppliers/:supplierId/payments", async (request, reply) => {
+      const actor = await requireTenantActor(request, ["owner", "admin", "manager"]);
+      const key = request.headers["idempotency-key"];
+      const body = request.body ?? {};
+      const amount = String(body.amount ?? "");
+      const reference = body.reference?.trim() || null;
+      const notes = body.notes?.trim() || null;
+      if (typeof key !== "string" || key.length < 8 || key.length > 128) {
+        return reply.code(400).send({ error: { code: "IDEMPOTENCY_KEY_REQUIRED", message: "Supplier payment requires an Idempotency-Key header." } });
+      }
+      if (!body.branchId || !/^\\d+(?:\\.\\d{1,2})?$/.test(amount) || !Number.isFinite(Number(amount)) ||
+          Number(amount) <= 0 || Number(amount) > 9999999999.99 ||
+          !["cash", "upi", "card", "bank_transfer"].includes(body.paymentMethod ?? "") ||
+          (reference && reference.length > 120) || (notes && notes.length > 500)) {
+        return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Provide a branch, positive amount, valid payment method and concise optional reference/notes." } });
+      }
+      assertBranchAccess(actor, body.branchId);
+      const requestHash = createRequestFingerprint({ supplierId: request.params.supplierId, branchId: body.branchId, amount, paymentMethod: body.paymentMethod, reference, notes });
+      const result = await withTenantTransaction(actor.tenantId, async (client) => {
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
+        const prior = await client.query(
+          "SELECT id, request_hash FROM supplier_payments WHERE tenant_id=$1 AND idempotency_key=$2",
+          [actor.tenantId, key],
+        );
+        if (prior.rowCount) {
+          if (prior.rows[0].request_hash !== requestHash) return { conflict: true as const };
+          const existing = await client.query(
+            `SELECT id, supplier_id AS "supplierId", branch_id AS "branchId", amount::text,
+                    payment_method AS "paymentMethod", reference, notes, created_at AS "createdAt"
+             FROM supplier_payments WHERE tenant_id=$1 AND id=$2`,
+            [actor.tenantId, prior.rows[0].id],
+          );
+          return { payment: existing.rows[0], replayed: true as const };
+        }
+        const supplier = await client.query("SELECT id FROM suppliers WHERE tenant_id=$1 AND id=$2 FOR UPDATE", [actor.tenantId, request.params.supplierId]);
+        if (!supplier.rowCount) throw Object.assign(new Error("Supplier not found."), { statusCode: 404 });
+        const totals = await client.query(
+          `SELECT
+             COALESCE((SELECT SUM(grand_total) FROM purchase_receipts WHERE tenant_id=$1 AND supplier_id=$2 AND status='received'),0)::text AS purchased,
+             COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE tenant_id=$1 AND supplier_id=$2),0)::text AS paid`,
+          [actor.tenantId, request.params.supplierId],
+        );
+        const outstanding = toCents(totals.rows[0].purchased) - toCents(totals.rows[0].paid);
+        if (toCents(amount) > outstanding) throw Object.assign(new Error("Supplier payment exceeds the outstanding balance."), { statusCode: 409 });
+        const created = await client.query(
+          `INSERT INTO supplier_payments
+           (tenant_id, branch_id, supplier_id, amount, payment_method, reference, notes, idempotency_key, request_hash, actor_subject)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           RETURNING id, supplier_id AS "supplierId", branch_id AS "branchId", amount::text,
+                     payment_method AS "paymentMethod", reference, notes, created_at AS "createdAt"`,
+          [actor.tenantId, body.branchId, request.params.supplierId, amount, body.paymentMethod, reference, notes, key, requestHash, actor.authSubject],
+        );
+        return { payment: created.rows[0], replayed: false as const };
+      });
+      if ("conflict" in result && result.conflict) return reply.code(409).send({ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "This Idempotency-Key was already used for a different supplier payment." } });
+      return reply.code(result.replayed ? 200 : 201).send(result);
+    }
+  );
+
+  app.get<{ Params: { supplierId: string } }>("/api/v1/business/suppliers/:supplierId/statement", async (request) => {
+    const actor = await requireTenantActor(request);
+    return withTenantTransaction(actor.tenantId, async (client) => {
+      const supplier = await client.query("SELECT id, name FROM suppliers WHERE tenant_id=$1 AND id=$2", [actor.tenantId, request.params.supplierId]);
+      if (!supplier.rowCount) throw Object.assign(new Error("Supplier not found."), { statusCode: 404 });
+      const rows = await client.query(
+        `WITH ledger AS (
+           SELECT r.id, r.receipt_number AS reference, r.created_at AS "createdAt",
+                  'purchase'::text AS type, r.grand_total::numeric AS debit, 0::numeric AS credit
+           FROM purchase_receipts r
+           WHERE r.tenant_id=$1 AND r.supplier_id=$2 AND r.status='received'
+             AND ($3::uuid[] IS NULL OR r.branch_id=ANY($3))
+           UNION ALL
+           SELECT p.id, COALESCE(p.reference, p.id::text) AS reference, p.created_at AS "createdAt",
+                  'payment'::text AS type, 0::numeric AS debit, p.amount AS credit
+           FROM supplier_payments p
+           WHERE p.tenant_id=$1 AND p.supplier_id=$2
+             AND ($3::uuid[] IS NULL OR p.branch_id=ANY($3))
+         )
+         SELECT id, reference, "createdAt", type, debit::text, credit::text,
+                SUM(debit-credit) OVER (ORDER BY "createdAt", id ROWS UNBOUNDED PRECEDING)::text AS balance
+         FROM ledger ORDER BY "createdAt", id`,
+        [actor.tenantId, request.params.supplierId, actor.branchIds.length ? actor.branchIds : null],
+      );
+      const totals = rows.rows.reduce((acc: { purchased: bigint; paid: bigint }, row: { debit: string; credit: string }) => {
+        acc.purchased += toCents(row.debit); acc.paid += toCents(row.credit); return acc;
+      }, { purchased: 0n, paid: 0n });
+      return {
+        supplier: supplier.rows[0],
+        summary: { totalPurchased: formatMoney(totals.purchased), totalPaid: formatMoney(totals.paid), outstanding: formatMoney(totals.purchased - totals.paid) },
+        entries: rows.rows,
+      };
+    });
   });
 
   app.post<{ Body: PurchaseBody }>("/api/v1/business/purchases/receipts", async (request, reply) => {
