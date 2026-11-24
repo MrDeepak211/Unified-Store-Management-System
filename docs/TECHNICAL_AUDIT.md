@@ -122,3 +122,14 @@ Purchase receipt creation increases inventory and records supplier liability; it
 PR #17 and PR #18 passed the repository GitHub Actions validation workflow against disposable CI PostgreSQL, including migrations, API integration tests, typecheck and monorepo build. This is code-level CI verification only. No hosted staging database, production deployment, live customer data or payment provider transaction was used.
 
 Supplier ledger scope currently records supplier-level aggregate payments rather than allocating each payment to a particular purchase receipt. Supplier credit notes, purchase returns, payment reversals/refunds, GST input-credit treatment and a full three-way supplier statement reconciliation remain future work. Do not treat this feature as an accounting or tax certification.
+
+
+## Supplier purchase returns and credit notes — 2026-11-24
+
+Purchase returns can now be posted against a specific received goods receipt. The API locks the source receipt and receipt item rows, calculates the remaining unreturned quantity, and rejects over-returns. It removes only unreserved branch stock and records a negative inventory movement for each returned product. The return and stock updates run in one tenant transaction with request-key idempotency.
+
+Posted supplier credit notes appear as credits in the supplier statement and reduce outstanding supplier liability and future payment limits. They do not create cashbook cash-in or cash-out because a credit note is not itself a cash settlement. Branch-scoped supplier outstanding totals include purchases, posted credit notes and payments for the actor's accessible branches.
+
+PostgreSQL-backed CI verified the new migration, purchase return integration, idempotent replay, over-return rejection, stock/reserved quantity preservation, supplier statement totals, TypeScript typecheck and monorepo build. See [PR #21](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/21).
+
+Remaining accounting scope: allocation of supplier payments and credit notes to individual receipts, supplier credit-note reversal/void workflow, supplier statement export/print, and tax-professional review. This is not accounting or tax certification. Hosted staging integration and production deployment remain deferred.
