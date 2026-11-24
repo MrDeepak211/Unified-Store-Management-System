@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createRequestFingerprint } from "../idempotency.js";
 import type { FastifyInstance } from "fastify";
 import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
@@ -22,6 +23,7 @@ export async function registerInventoryTransferRoutes(app: FastifyInstance) {
     if (new Set(productIds).size !== productIds.length || body.items.some((item) => !item.productId || !Number.isSafeInteger(item.quantity) || item.quantity < 1)) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Transfer items must have unique products and positive whole-number quantities." } });
     }
+    const requestHash = createRequestFingerprint({ fromBranchId: body.fromBranchId, toBranchId: body.toBranchId, items: [...body.items].sort((a, b) => a.productId.localeCompare(b.productId)) });
     try {
       const result = await withTenantTransaction(actor.tenantId, async (client) => {
         await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
@@ -36,13 +38,13 @@ export async function registerInventoryTransferRoutes(app: FastifyInstance) {
           "SELECT id, transfer_number AS \"transferNumber\", status FROM inventory_transfers WHERE tenant_id = $1 AND idempotency_key = $2",
           [actor.tenantId, key],
         );
-        if (prior.rowCount) return { transfer: prior.rows[0], replayed: true };
+        if (prior.rowCount) { if (prior.rows[0].requestHash !== requestHash) return { conflict: true as const }; return { transfer: prior.rows[0], replayed: true as const }; }
         const transferId = randomUUID();
         const transferNumber = `TRF-${randomUUID().slice(0, 8).toUpperCase()}`;
         await client.query(
-          `INSERT INTO inventory_transfers (id, tenant_id, from_branch_id, to_branch_id, transfer_number, idempotency_key)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [transferId, actor.tenantId, body.fromBranchId, body.toBranchId, transferNumber, key],
+          `INSERT INTO inventory_transfers (id, tenant_id, from_branch_id, to_branch_id, transfer_number, idempotency_key, request_hash)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [transferId, actor.tenantId, body.fromBranchId, body.toBranchId, transferNumber, key, requestHash],
         );
         for (const item of body.items!) {
           const product = await client.query("SELECT id FROM products WHERE tenant_id = $1 AND id = $2", [actor.tenantId, item.productId]);
@@ -77,6 +79,7 @@ export async function registerInventoryTransferRoutes(app: FastifyInstance) {
         await notifyInventoryChanged(client, { tenantId: actor.tenantId, branchId: body.toBranchId!, productIds });
         return { transfer: { id: transferId, transferNumber, status: "completed" }, replayed: false };
       });
+      if ("conflict" in result && result.conflict) return reply.code(409).send({ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "This Idempotency-Key was already used with a different inventory transfer. Use a new key." } });
       return reply.code(result.replayed ? 200 : 201).send(result);
     } catch (error) {
       const status = typeof error === "object" && error && "statusCode" in error ? Number(error.statusCode) : 500;
