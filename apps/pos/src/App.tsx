@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { enqueuePendingSale, listPendingSales, markPendingSaleFailed, removePendingSale } from "./offlineQueue";
+import { canSyncPendingSale, isLegacyUnscopedSale } from "./offlineQueuePolicy";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 type Shop = { tenantId: string; shopName: string; slug: string; role: string };
@@ -20,6 +21,7 @@ type Invoice = { orderId: string; invoiceNumber: string; grandTotal: string; sub
 type InvoiceLine = { productName: string; sku?: string | null; hsnCode?: string | null; unitOfMeasure: string; quantity: number; unitPrice: string; taxRate: string; lineTotal: string };
 type InvoiceDetail = { invoice: Invoice; items: InvoiceLine[]; documentType: string; gstReviewRequired: boolean };
 type StaffMember = { id: string; email: string; role: string; branchIds: string[]; isActive: boolean };
+class ApiRequestError extends Error { constructor(public readonly status: number, message: string) { super(message); this.name = "ApiRequestError"; } }
 type OnlineOrder = { id: string; orderNumber: string; status: string; paymentStatus: string; providerPaymentStatus?: string | null; customerName?: string | null; customerPhone?: string | null; grandTotal: string; branchName: string; createdAt: string; deliveryAddress?: { line1?: string; line2?: string; city?: string; state?: string; pincode?: string; country?: string }; items: Array<{ productName: string; quantity: number; lineTotal: string }> };
 
 export default function App() {
@@ -126,7 +128,7 @@ export default function App() {
     if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
     const response = await fetch(API_URL + path, { ...init, headers });
     const data = await response.json() as T & { error?: { message?: string } };
-    if (!response.ok) throw new Error(data.error?.message ?? `Request failed (${response.status}).`);
+    if (!response.ok) throw new ApiRequestError(response.status, data.error?.message ?? `Request failed (${response.status}).`);
     return data;
   }
 
@@ -135,18 +137,23 @@ export default function App() {
     if (!session || !tenantId || !navigator.onLine) return;
     const rows = await listPendingSales();
     for (const row of rows) {
-      if (row.status === "failed") continue;
+      if (isLegacyUnscopedSale(row)) {
+        await markPendingSaleFailed(row.id, "This older offline sale has no saved shop ID. It was not uploaded; manually reconcile it with the original shop.");
+        setError("An older offline sale needs manual review because its original shop could not be identified safely.");
+        continue;
+      }
+      if (!canSyncPendingSale(row, tenantId)) continue;
       const payload = row.payload as { branchId: string; items: CartLine[]; customerId?: string; paymentMethod?: string };
       try {
         await api("/api/v1/pos/sales", {
           method: "POST",
           headers: { "Idempotency-Key": row.id },
           body: JSON.stringify(payload),
-        }, tenantId);
+        }, row.tenantId);
         await removePendingSale(row.id);
       } catch (e) {
-        if (e instanceof TypeError || (e instanceof Error && /Request failed \(5\d\d\)/.test(e.message))) break;
-        await markPendingSaleFailed(row.id);
+        if (e instanceof TypeError || (e instanceof ApiRequestError && (e.status === 401 || e.status === 408 || e.status === 429 || e.status >= 500))) break;
+        await markPendingSaleFailed(row.id, e instanceof Error ? e.message : "The server rejected this queued sale. Review it before retrying.");
       }
     }
     const remaining = await listPendingSales();
@@ -547,7 +554,7 @@ export default function App() {
     } catch (e) {
       if (e instanceof TypeError) {
         try {
-          await enqueuePendingSale({ branchId, customerId: selectedCustomerId || undefined, paymentMethod, items: cart });
+          await enqueuePendingSale(tenantId, { branchId, customerId: selectedCustomerId || undefined, paymentMethod, items: cart });
           setCart([]);
           setSelectedCustomerId("");
           setPaymentMethod("cash");
@@ -576,7 +583,7 @@ export default function App() {
     <section className="main-panel"><header className="business-topbar"><div><span className="eyebrow">BUSINESS WORKSPACE</span><h2>{activeShop?.shopName ?? "Your shop"}</h2></div><div className="topbar-actions"><select value={tenantId} onChange={(e) => setTenantId(e.target.value)}>{shops.map((shop) => <option key={shop.tenantId} value={shop.tenantId}>{shop.shopName}</option>)}</select><select aria-label="Active branch" value={branchId} onChange={(e)=>setBranchId(e.target.value)}>{branches.map((branch)=><option key={branch.id} value={branch.id}>{branch.name}</option>)}</select><span className="user-avatar">{session.user.email?.slice(0,1).toUpperCase()}</span></div></header>
       {error && <div className="alert error-alert">{error}</div>}{message && <div className="alert success-alert">{message}</div>}
       <section id="overview" className="welcome-row"><div><p className="eyebrow">YOUR BUSINESS, AT A GLANCE</p><h1>Good evening.</h1><p>Everything your physical and online store needs, in one place.</p></div><div className="branch-chip">⌖ {branches.find((b) => b.id === branchId)?.name ?? "Loading branch"}</div></section>
-      <section className="metric-grid"><article><span>PRODUCTS</span><strong>{products.length}</strong><small>In your catalogue</small></article><article><span>AVAILABLE STOCK</span><strong>{products.reduce((sum,p) => sum + p.availableStock,0)}</strong><small>Across this shop</small></article><article><span>LOW STOCK</span><strong>{products.filter((p) => p.availableStock > 0 && p.availableStock <= 5).length}</strong><small>5 units or fewer</small></article><article><span>OFFLINE QUEUE</span><strong>{pendingCount ?? "—"}</strong><small>Pending local sales</small></article></section>
+      <section className="metric-grid"><article><span>PRODUCTS</span><strong>{products.length}</strong><small>In your catalogue</small></article><article><span>AVAILABLE STOCK</span><strong>{products.reduce((sum,p) => sum + p.availableStock,0)}</strong><small>Across this shop</small></article><article><span>LOW STOCK</span><strong>{products.filter((p) => p.availableStock > 0 && p.availableStock <= 5).length}</strong><small>5 units or fewer</small></article><article><span>OFFLINE QUEUE</span><strong>{pendingCount ?? "—"}</strong><small>Pending or needing review</small></article></section>
       <section className="management-grid" id="products"><div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">CATALOGUE</span><h3>Products & inventory</h3></div><span className="muted">{products.length} ITEMS</span></div>{loading ? <p>Loading products…</p> : <div className="product-table"><div className="table-head"><span>PRODUCT</span><span>PRICE</span><span>AVAILABLE</span></div>{products.map((product) => <div className="table-row" key={product.id}><div><b>{product.name}</b><small>{product.sku}</small></div><span>₹{Number(product.price).toFixed(2)}</span><strong className={product.availableStock <= 5 ? "low-stock" : ""}>{product.availableStock}</strong></div>)}</div>}
         <form className="inline-form" onSubmit={addProduct}><h4>Add a product</h4><div className="form-grid"><input value={newSku} onChange={(e)=>setNewSku(e.target.value)} required placeholder="SKU / barcode"/><input value={newName} onChange={(e)=>setNewName(e.target.value)} required placeholder="Product name"/><input value={newPrice} onChange={(e)=>setNewPrice(e.target.value)} required type="number" min="0" step="0.01" placeholder="Price ₹"/><input value={newTax} onChange={(e)=>setNewTax(e.target.value)} type="number" min="0" max="100" step="0.01" placeholder="Tax %"/><input value={newHsn} onChange={(e)=>setNewHsn(e.target.value)} placeholder="HSN code (optional)"/><input value={newUnit} onChange={(e)=>setNewUnit(e.target.value)} placeholder="Unit (PCS, KG, LTR)"/><input value={newBarcode} onChange={(e)=>setNewBarcode(e.target.value)} placeholder="Barcode (optional)"/><select value={newCategoryId} onChange={(e)=>setNewCategoryId(e.target.value)}><option value="">No category</option>{categories.map((cat)=><option key={cat.id} value={cat.id}>{cat.name}</option>)}</select></div><button className="secondary-button" disabled={!branchId}>Save product</button></form><form className="inline-form" onSubmit={addCategory}><h4>Create category</h4><div className="form-grid"><input value={newCategoryName} onChange={(e)=>setNewCategoryName(e.target.value)} required placeholder="Category name"/></div><button className="secondary-button">Add category</button></form>
         <form className="inline-form stock-form" onSubmit={adjustStock}><h4>Receive / adjust stock</h4><div className="form-grid"><select value={stockProductId} onChange={(e)=>setStockProductId(e.target.value)} required><option value="">Select product</option>{products.map((p)=><option key={p.id} value={p.id}>{p.name} · {p.availableStock} available</option>)}</select><input type="number" step="1" value={stockDelta} onChange={(e)=>setStockDelta(e.target.value)} required placeholder="Quantity change (+/-)"/></div><button className="secondary-button" disabled={!stockProductId}>Update stock</button></form>
