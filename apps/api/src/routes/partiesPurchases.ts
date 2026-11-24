@@ -300,10 +300,10 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
       const requestHash = createRequestFingerprint({ supplierId: request.params.supplierId, sourceType: body.sourceType, sourceId: body.sourceId, allocations: normalized });
       const result = await withTenantTransaction(actor.tenantId, async (client) => {
         await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
-        const prior = await client.query("SELECT request_hash, id FROM supplier_payment_allocations WHERE tenant_id=$1 AND idempotency_key=$2", [actor.tenantId,key]);
+        const prior = await client.query("SELECT request_hash, allocation_batch_id FROM supplier_payment_allocations WHERE tenant_id=$1 AND idempotency_key=$2 LIMIT 1", [actor.tenantId,key]);
         if (prior.rowCount) {
           if (prior.rows[0].request_hash !== requestHash) return { conflict: true as const };
-          return { allocationBatchId: prior.rows[0].id, replayed: true as const };
+          return { allocationBatchId: prior.rows[0].allocation_batch_id, replayed: true as const };
         }
         const supplier = await client.query("SELECT id FROM suppliers WHERE tenant_id=$1 AND id=$2 FOR UPDATE", [actor.tenantId,request.params.supplierId]);
         if (!supplier.rowCount) throw Object.assign(new Error("Supplier not found."), { statusCode: 404 });
@@ -345,8 +345,8 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
         const batchId = randomUUID();
         for (const item of prepared) {
           await client.query(
-            "INSERT INTO supplier_payment_allocations (tenant_id,id,branch_id,supplier_id,source_type,source_id,receipt_id,amount,idempotency_key,request_hash,actor_subject) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
-            [actor.tenantId,randomUUID(),source.rows[0].branch_id,request.params.supplierId,body.sourceType,body.sourceId,item.receiptId,formatMoney(item.amount),key,requestHash,actor.authSubject],
+            "INSERT INTO supplier_payment_allocations (tenant_id,id,branch_id,supplier_id,source_type,source_id,receipt_id,amount,allocation_batch_id,idempotency_key,request_hash,actor_subject) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+            [actor.tenantId,randomUUID(),source.rows[0].branch_id,request.params.supplierId,body.sourceType,body.sourceId,item.receiptId,formatMoney(item.amount),batchId,key,requestHash,actor.authSubject],
           );
         }
         return { allocationBatchId: batchId, allocatedAmount:formatMoney(requestedTotal), replayed:false as const };

@@ -8,6 +8,7 @@ CREATE TABLE supplier_payment_allocations (
   source_id uuid NOT NULL,
   receipt_id uuid NOT NULL,
   amount numeric(12,2) NOT NULL CHECK (amount > 0),
+  allocation_batch_id uuid NOT NULL,
   idempotency_key text NOT NULL,
   request_hash text NOT NULL CHECK (request_hash ~ '^[0-9a-f]{64}$'),
   actor_subject text NOT NULL,
