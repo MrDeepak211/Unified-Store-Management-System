@@ -282,6 +282,80 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
     }
   );
 
+  app.post<{ Params: { supplierId: string }; Body: { sourceType?: "payment" | "credit_note"; sourceId?: string; allocations?: Array<{ receiptId: string; amount: string | number }> } }>(
+    "/api/v1/business/suppliers/:supplierId/allocations", async (request, reply) => {
+      const actor = await requireTenantActor(request, ["owner", "admin", "manager"]);
+      const key = request.headers["idempotency-key"];
+      const body = request.body ?? {};
+      if (typeof key !== "string" || key.length < 8 || key.length > 128) {
+        return reply.code(400).send({ error: { code: "IDEMPOTENCY_KEY_REQUIRED", message: "Supplier allocation requires an Idempotency-Key header." } });
+      }
+      if (!["payment", "credit_note"].includes(body.sourceType ?? "") || !body.sourceId ||
+          !Array.isArray(body.allocations) || body.allocations.length < 1 || body.allocations.length > 100 ||
+          new Set(body.allocations.map((item) => item.receiptId)).size !== body.allocations.length ||
+          body.allocations.some((item) => !item.receiptId || !/^\d+(?:\.\d{1,2})?$/.test(String(item.amount)) || Number(item.amount) <= 0)) {
+        return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Provide a payment or credit note and unique receipts with positive allocation amounts." } });
+      }
+      const normalized = [...body.allocations].map((item) => ({ receiptId: item.receiptId, amount: String(item.amount) })).sort((a,b) => a.receiptId.localeCompare(b.receiptId));
+      const requestHash = createRequestFingerprint({ supplierId: request.params.supplierId, sourceType: body.sourceType, sourceId: body.sourceId, allocations: normalized });
+      const result = await withTenantTransaction(actor.tenantId, async (client) => {
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
+        const prior = await client.query("SELECT request_hash, allocation_batch_id FROM supplier_payment_allocations WHERE tenant_id=$1 AND idempotency_key=$2 LIMIT 1", [actor.tenantId,key]);
+        if (prior.rowCount) {
+          if (prior.rows[0].request_hash !== requestHash) return { conflict: true as const };
+          return { allocationBatchId: prior.rows[0].allocation_batch_id, replayed: true as const };
+        }
+        const supplier = await client.query("SELECT id FROM suppliers WHERE tenant_id=$1 AND id=$2 FOR UPDATE", [actor.tenantId,request.params.supplierId]);
+        if (!supplier.rowCount) throw Object.assign(new Error("Supplier not found."), { statusCode: 404 });
+        const source = body.sourceType === "payment"
+          ? await client.query("SELECT id, branch_id, amount::text AS amount, supplier_id FROM supplier_payments WHERE tenant_id=$1 AND id=$2 FOR UPDATE", [actor.tenantId,body.sourceId])
+          : await client.query("SELECT id, branch_id, credit_total::text AS amount, supplier_id FROM supplier_purchase_returns WHERE tenant_id=$1 AND id=$2 AND status='posted' FOR UPDATE", [actor.tenantId,body.sourceId]);
+        if (!source.rowCount || source.rows[0].supplier_id !== request.params.supplierId) throw Object.assign(new Error("Payment or posted credit note was not found for this supplier."), { statusCode: 404 });
+        assertBranchAccess(actor, source.rows[0].branch_id);
+        const sourceAmount = toCents(source.rows[0].amount);
+        const sourceAllocated = await client.query(
+          "SELECT COALESCE(SUM(amount),0)::text AS amount FROM supplier_payment_allocations WHERE tenant_id=$1 AND source_type=$2 AND source_id=$3",
+          [actor.tenantId,body.sourceType,body.sourceId],
+        );
+        let requestedTotal = 0n;
+        const prepared: Array<{receiptId:string; amount:bigint}> = [];
+        for (const item of normalized) {
+          const receipt = await client.query(
+            "SELECT id, branch_id, supplier_id, grand_total::text AS amount, status FROM purchase_receipts WHERE tenant_id=$1 AND id=$2 FOR UPDATE",
+            [actor.tenantId,item.receiptId],
+          );
+          if (!receipt.rowCount || receipt.rows[0].supplier_id !== request.params.supplierId || receipt.rows[0].status !== "received" ||
+              receipt.rows[0].branch_id !== source.rows[0].branch_id) {
+            throw Object.assign(new Error("Each receipt must be received, belong to this supplier and match the source branch."), { statusCode: 409 });
+          }
+          const amount = toCents(item.amount);
+          const receiptAllocated = await client.query(
+            "SELECT COALESCE(SUM(amount),0)::text AS amount FROM supplier_payment_allocations WHERE tenant_id=$1 AND receipt_id=$2",
+            [actor.tenantId,item.receiptId],
+          );
+          const receiptPaid = toCents(receiptAllocated.rows[0].amount);
+          const receiptOutstanding = toCents(receipt.rows[0].amount) - receiptPaid;
+          if (amount > receiptOutstanding) throw Object.assign(new Error("Allocation exceeds the receipt's remaining unallocated balance."), { statusCode: 409 });
+          requestedTotal += amount;
+          prepared.push({receiptId:item.receiptId,amount});
+        }
+        if (requestedTotal > sourceAmount - toCents(sourceAllocated.rows[0].amount)) {
+          throw Object.assign(new Error("Allocation exceeds the source payment or credit note's available amount."), { statusCode: 409 });
+        }
+        const batchId = randomUUID();
+        for (const item of prepared) {
+          await client.query(
+            "INSERT INTO supplier_payment_allocations (tenant_id,id,branch_id,supplier_id,source_type,source_id,receipt_id,amount,allocation_batch_id,idempotency_key,request_hash,actor_subject) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+            [actor.tenantId,randomUUID(),source.rows[0].branch_id,request.params.supplierId,body.sourceType,body.sourceId,item.receiptId,formatMoney(item.amount),batchId,key,requestHash,actor.authSubject],
+          );
+        }
+        return { allocationBatchId: batchId, allocatedAmount:formatMoney(requestedTotal), replayed:false as const };
+      });
+      if ("conflict" in result && result.conflict) return reply.code(409).send({ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "This Idempotency-Key was already used for a different allocation." } });
+      return reply.code(result.replayed ? 200 : 201).send(result);
+    }
+  );
+
   app.get<{ Params: { supplierId: string } }>("/api/v1/business/suppliers/:supplierId/statement", async (request) => {
     const actor = await requireTenantActor(request);
     return withTenantTransaction(actor.tenantId, async (client) => {
