@@ -34,6 +34,17 @@ The pull request was validated by GitHub Actions before merge to `staging`. All 
 
 Merged change: [PR #1 — checkout concurrency and refund inventory safety](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/1).
 
+
+### Request-bound idempotency across business mutations
+
+POS sales and public storefront checkout now persist a canonical SHA-256 fingerprint of the normalized request alongside the idempotency key. An identical retry returns the original order; reuse of the same key with a different cart, branch, customer or checkout details returns HTTP 409 `IDEMPOTENCY_KEY_REUSED` rather than silently returning a prior order.
+
+The same protection now covers purchase receipts, expenses, sales returns and inventory transfers. Legacy rows created before fingerprint migrations have a NULL fingerprint and are conservatively rejected as replays because their original request cannot be reconstructed safely. New schema changes are in migrations `0016_sales_order_request_fingerprint.sql` and `0017_business_mutation_request_fingerprints.sql`.
+
+Both implementation PRs passed the full GitHub Actions CI suite, including PostgreSQL migrations and smoke tests, API authorization and integration tests, idempotency unit tests, typecheck and build:
+- [PR #4 — POS and storefront request-bound idempotency](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/4)
+- [PR #5 — purchase, expense, return and transfer request-bound idempotency](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/5)
+
 ## Remaining release blockers
 
 ### Reproducible dependencies
