@@ -19,6 +19,7 @@ import { registerStaffRoutes } from "./routes/staff.js";
 import { registerOnlineOrderManagementRoutes } from "./routes/onlineOrderManagement.js";
 import { registerExpenseRoutes } from "./routes/expenses.js";
 import { registerSaleRoutes } from "./routes/sales.js";
+import { registerReceivableRoutes } from "./routes/receivables.js";
 import { registerStorefrontRoutes } from "./routes/storefront.js";
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -69,6 +70,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerRazorpayWebhookRoutes(app);
   await registerProfileAndInvoiceRoutes(app);
   await registerSaleRoutes(app);
+  await registerReceivableRoutes(app);
   await registerStorefrontRoutes(app);
   await registerInventoryEventRoutes(app);
   await registerOnlineOrderRoutes(app);
