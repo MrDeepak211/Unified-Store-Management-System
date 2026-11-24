@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { registerProductRoutes } from "./routes/products.js";
 import { registerOnboardingRoutes } from "./routes/onboarding.js";
 import { registerInventoryRoutes } from "./routes/inventory.js";
+import { registerInventoryReconciliationRoutes } from "./routes/inventoryReconciliation.js";
 import { registerOnlineOrderRoutes } from "./routes/onlineOrders.js";
 import { registerMeRoutes } from "./routes/me.js";
 import { registerBranchRoutes } from "./routes/branches.js";
@@ -63,6 +64,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerExpenseRoutes(app);
   await registerProductRoutes(app);
   await registerInventoryRoutes(app);
+  await registerInventoryReconciliationRoutes(app);
   await registerPartyAndPurchaseRoutes(app);
   await registerReturnsAndReportsRoutes(app);
   await registerStoreSettingsRoutes(app);
