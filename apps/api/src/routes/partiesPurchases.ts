@@ -87,9 +87,14 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
                     AND ($2::uuid[] IS NULL OR p.branch_id=ANY($2))),0)::text AS "totalPaid",
                 GREATEST(
                   COALESCE((SELECT SUM(r.grand_total) FROM purchase_receipts r
-                    WHERE r.tenant_id=s.tenant_id AND r.supplier_id=s.id AND r.status='received'),0)
+                    WHERE r.tenant_id=s.tenant_id AND r.supplier_id=s.id AND r.status='received'
+                      AND ($2::uuid[] IS NULL OR r.branch_id=ANY($2))),0)
+                  - COALESCE((SELECT SUM(cr.credit_total) FROM supplier_purchase_returns cr
+                    WHERE cr.tenant_id=s.tenant_id AND cr.supplier_id=s.id AND cr.status='posted'
+                      AND ($2::uuid[] IS NULL OR cr.branch_id=ANY($2))),0)
                   - COALESCE((SELECT SUM(p.amount) FROM supplier_payments p
-                    WHERE p.tenant_id=s.tenant_id AND p.supplier_id=s.id),0),0
+                    WHERE p.tenant_id=s.tenant_id AND p.supplier_id=s.id
+                      AND ($2::uuid[] IS NULL OR p.branch_id=ANY($2))),0),0
                 )::text AS "outstanding"
          FROM suppliers s WHERE s.tenant_id = $1 ORDER BY s.created_at DESC LIMIT 500`,
         [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
