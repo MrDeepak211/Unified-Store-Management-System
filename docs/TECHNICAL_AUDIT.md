@@ -45,6 +45,13 @@ Both implementation PRs passed the full GitHub Actions CI suite, including Postg
 - [PR #4 — POS and storefront request-bound idempotency](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/4)
 - [PR #5 — purchase, expense, return and transfer request-bound idempotency](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/5)
 
+
+### Offline POS queue tenant isolation
+
+Offline sale events now persist their originating tenant ID in IndexedDB. The synchronizer submits an event only when its stored tenant matches the currently active tenant; events for other shops remain queued. Older queue entries without a tenant binding are quarantined for manual reconciliation instead of being assigned to whichever shop happens to be active after reconnecting. Authentication expiry, rate limiting, network failures and server errors remain retryable; permanent business/authorization failures retain an error reason for review.
+
+The POS IndexedDB schema version was advanced to 2 and unit tests cover active-tenant matching, cross-tenant exclusion, failed-event exclusion and legacy unscoped events. See [PR #6 — offline queue tenant isolation](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/6).
+
 ## Remaining release blockers
 
 ### Reproducible dependencies
