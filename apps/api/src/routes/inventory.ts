@@ -12,6 +12,9 @@ type AdjustmentBody = {
   delta?: number;
   reason?: AdjustmentReason;
   note?: string;
+};
+
+export async function registerInventoryRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { branchId?: string; productId?: string; limit?: string } }>("/api/v1/business/inventory/movements", async (request, reply) => {
     const actor = await requireTenantActor(request);
     const branchId = request.query.branchId;
@@ -44,9 +47,6 @@ type AdjustmentBody = {
     return reply.send({ movements: result });
   });
 
-};
-
-export async function registerInventoryRoutes(app: FastifyInstance) {
   app.post<{ Body: AdjustmentBody }>("/api/v1/business/inventory/adjustments", async (request, reply) => {
     const actor = await requireTenantActor(request, ["owner", "admin", "manager"]);
     const key = request.headers["idempotency-key"];
