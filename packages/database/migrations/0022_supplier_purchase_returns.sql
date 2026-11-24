@@ -1,4 +1,6 @@
 -- Supplier purchase returns / credit notes, tied to received goods and audited stock removals.
+ALTER TABLE purchase_receipt_items
+  ADD CONSTRAINT purchase_receipt_items_tenant_id_unique UNIQUE (tenant_id, id);
 CREATE TABLE supplier_purchase_returns (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL,
