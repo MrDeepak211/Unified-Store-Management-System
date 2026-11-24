@@ -96,6 +96,7 @@ after(async () => {
     await pool.query("DELETE FROM inventory_balances WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM inventory_balances WHERE tenant_id = $1", [tenantB]);
     await pool.query("DELETE FROM inventory_balances WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = ANY($1::uuid[]))", [[tenantA, tenantB]]);
+    await pool.query("DELETE FROM supplier_payment_allocations WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM supplier_payments WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM supplier_purchase_return_items WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM supplier_purchase_returns WHERE tenant_id = $1", [tenantA]);
@@ -427,6 +428,41 @@ test("supplier payments reconcile partial balances, reject overpayment and repla
   const afterReturnStock = await pool.query("SELECT on_hand,reserved FROM inventory_balances WHERE tenant_id=$1 AND branch_id=$2 AND product_id=$3", [tenantA,branchA,productId]);
   assert.equal(afterReturnStock.rows[0].on_hand, 4);
   assert.equal(afterReturnStock.rows[0].reserved, 1);
+
+  const paymentAllocationHeaders = { ...ownerHeaders, "content-type": "application/json", "idempotency-key": "supplier-allocation-payment-001" };
+  const paymentAllocation = await app.inject({
+    method: "POST", url: `/api/v1/business/suppliers/${supplierId}/allocations`,
+    headers: paymentAllocationHeaders,
+    payload: { sourceType: "payment", sourceId: payment.json().payment.id, allocations: [{ receiptId, amount: "25.00" }] },
+  });
+  assert.equal(paymentAllocation.statusCode, 201, paymentAllocation.body);
+  assert.equal(paymentAllocation.json().allocatedAmount, "25.00");
+  const paymentAllocationReplay = await app.inject({
+    method: "POST", url: `/api/v1/business/suppliers/${supplierId}/allocations`,
+    headers: paymentAllocationHeaders,
+    payload: { sourceType: "payment", sourceId: payment.json().payment.id, allocations: [{ receiptId, amount: "25.00" }] },
+  });
+  assert.equal(paymentAllocationReplay.statusCode, 200, paymentAllocationReplay.body);
+  assert.equal(paymentAllocationReplay.json().replayed, true);
+  const paymentOverAllocation = await app.inject({
+    method: "POST", url: `/api/v1/business/suppliers/${supplierId}/allocations`,
+    headers: { ...ownerHeaders, "content-type": "application/json", "idempotency-key": "supplier-allocation-payment-002" },
+    payload: { sourceType: "payment", sourceId: payment.json().payment.id, allocations: [{ receiptId, amount: "15.01" }] },
+  });
+  assert.equal(paymentOverAllocation.statusCode, 409, paymentOverAllocation.body);
+
+  const creditAllocation = await app.inject({
+    method: "POST", url: `/api/v1/business/suppliers/${supplierId}/allocations`,
+    headers: { ...ownerHeaders, "content-type": "application/json", "idempotency-key": "supplier-allocation-credit-001" },
+    payload: { sourceType: "credit_note", sourceId: purchaseReturn.json().creditNote.id, allocations: [{ receiptId, amount: "10.00" }] },
+  });
+  assert.equal(creditAllocation.statusCode, 201, creditAllocation.body);
+  const receiptOverAllocation = await app.inject({
+    method: "POST", url: `/api/v1/business/suppliers/${supplierId}/allocations`,
+    headers: { ...ownerHeaders, "content-type": "application/json", "idempotency-key": "supplier-allocation-credit-002" },
+    payload: { sourceType: "credit_note", sourceId: purchaseReturn.json().creditNote.id, allocations: [{ receiptId, amount: "10.01" }] },
+  });
+  assert.equal(receiptOverAllocation.statusCode, 409, receiptOverAllocation.body);
 
   const statement = await app.inject({
     method: "GET", url: `/api/v1/business/suppliers/${supplierId}/statement`, headers: ownerHeaders,
