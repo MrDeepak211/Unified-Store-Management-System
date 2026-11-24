@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createRequestFingerprint } from "../idempotency.js";
 import type { FastifyInstance } from "fastify";
 import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
@@ -50,6 +51,7 @@ export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
     if (new Set(ids).size !== ids.length || body.items.some((item) => !item.productId || !Number.isSafeInteger(item.quantity) || item.quantity < 1)) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Return items must have unique products and positive whole-number quantities." } });
     }
+    const requestHash = createRequestFingerprint({ saleId: request.params.saleId, reason: body.reason?.trim() || null, restock: body.restock !== false, items: [...body.items].sort((a, b) => a.productId.localeCompare(b.productId)) });
     const result = await withTenantTransaction(actor.tenantId, async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
       const sale = await client.query(
@@ -58,15 +60,15 @@ export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
       );
       if (!sale.rowCount) throw Object.assign(new Error("Sale not found or not eligible for return."), { statusCode: 404 });
       assertBranchAccess(actor, sale.rows[0].branch_id);
-      const prior = await client.query("SELECT id, return_number AS \"returnNumber\", total::text FROM sales_returns WHERE tenant_id = $1 AND idempotency_key = $2", [actor.tenantId, key]);
-      if (prior.rowCount) return { returnRecord: prior.rows[0], replayed: true };
+      const prior = await client.query("SELECT id, return_number AS \"returnNumber\", total::text, request_hash AS \\"requestHash\\" FROM sales_returns WHERE tenant_id = $1 AND idempotency_key = $2", [actor.tenantId, key]);
+      if (prior.rowCount) { if (prior.rows[0].requestHash !== requestHash) return { conflict: true as const }; return { returnRecord: prior.rows[0], replayed: true as const }; }
       const restock = body.restock !== false;
       const returnId = randomUUID();
       const returnNumber = `RET-${randomUUID().slice(0, 8).toUpperCase()}`;
       await client.query(
-        `INSERT INTO sales_returns (id, tenant_id, branch_id, sales_order_id, return_number, status, reason, idempotency_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [returnId, actor.tenantId, sale.rows[0].branch_id, sale.rows[0].id, returnNumber, restock ? "restocked" : "inspection_pending", body.reason?.trim() || null, key],
+        `INSERT INTO sales_returns (id, tenant_id, branch_id, sales_order_id, return_number, status, reason, idempotency_key, request_hash)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [returnId, actor.tenantId, sale.rows[0].branch_id, sale.rows[0].id, returnNumber, restock ? "restocked" : "inspection_pending", body.reason?.trim() || null, key, requestHash],
       );
       let total = 0n;
       for (const item of body.items!) {
@@ -117,6 +119,7 @@ export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
       if (restock) await notifyInventoryChanged(client, { tenantId: actor.tenantId, branchId: sale.rows[0].branch_id, productIds: ids });
       return { returnRecord: updated.rows[0], replayed: false };
     });
+    if ("conflict" in result && result.conflict) return reply.code(409).send({ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "This Idempotency-Key was already used with a different return. Use a new key." } });
     return reply.code(result.replayed ? 200 : 201).send(result);
   });
 
