@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createRequestFingerprint } from "../idempotency.js";
 import type { FastifyInstance } from "fastify";
 import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
@@ -123,16 +124,20 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Received items must have unique products, valid quantities, costs and tax rates." } });
     }
 
+    const requestHash = createRequestFingerprint({ branchId: body.branchId, supplierId: body.supplierId || null, items: [...body.items].map((item) => ({ productId: item.productId, quantity: item.quantity, unitCost: String(item.unitCost), taxRate: String(item.taxRate ?? "0") })).sort((a, b) => a.productId.localeCompare(b.productId)) });
     const result = await withTenantTransaction(actor.tenantId, async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
       assertBranchAccess(actor, body.branchId!);
       const branch = await client.query("SELECT id FROM branches WHERE tenant_id = $1 AND id = $2", [actor.tenantId, body.branchId]);
       if (!branch.rowCount) throw Object.assign(new Error("Selected branch was not found."), { statusCode: 404 });
       const prior = await client.query(
-        "SELECT id, receipt_number AS \"receiptNumber\", grand_total::text AS \"grandTotal\" FROM purchase_receipts WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1",
+        "SELECT id, receipt_number, grand_total::text, request_hash FROM purchase_receipts WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1",
         [actor.tenantId, key],
       );
-      if (prior.rowCount) return { receipt: prior.rows[0], replayed: true };
+      if (prior.rowCount) {
+        if (prior.rows[0].request_hash !== requestHash) return { conflict: true as const };
+        return { receipt: { id: prior.rows[0].id, receiptNumber: prior.rows[0].receipt_number, grandTotal: prior.rows[0].grand_total }, replayed: true as const };
+      }
       if (body.supplierId) {
         const supplier = await client.query("SELECT id FROM suppliers WHERE tenant_id = $1 AND id = $2", [actor.tenantId, body.supplierId]);
         if (!supplier.rowCount) throw Object.assign(new Error("Selected supplier was not found."), { statusCode: 404 });
@@ -140,9 +145,9 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
       const receiptId = randomUUID();
       const receiptNumber = `GRN-${randomUUID().slice(0, 8).toUpperCase()}`;
       await client.query(
-        `INSERT INTO purchase_receipts (id, tenant_id, branch_id, supplier_id, receipt_number, idempotency_key)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [receiptId, actor.tenantId, body.branchId, body.supplierId || null, receiptNumber, key],
+        `INSERT INTO purchase_receipts (id, tenant_id, branch_id, supplier_id, receipt_number, idempotency_key, request_hash)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [receiptId, actor.tenantId, body.branchId, body.supplierId || null, receiptNumber, key, requestHash],
       );
       let subtotal = 0n;
       let taxTotal = 0n;
@@ -183,6 +188,7 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
       await notifyInventoryChanged(client, { tenantId: actor.tenantId, branchId: body.branchId!, productIds: ids });
       return { receipt: receipt.rows[0], replayed: false };
     });
+    if ("conflict" in result && result.conflict) return reply.code(409).send({ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "This Idempotency-Key was already used with a different goods receipt. Use a new key." } });
     return reply.code(result.replayed ? 200 : 201).send(result);
   });
 }

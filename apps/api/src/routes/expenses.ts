@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { createRequestFingerprint } from "../idempotency.js";
 import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
 
@@ -33,17 +34,30 @@ export async function registerExpenseRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Provide a branch, category, description, positive amount and payment method." } });
     }
     assertBranchAccess(actor, body.branchId);
-    const expense = await withTenantTransaction(actor.tenantId, async (client) => {
+    const requestHash = createRequestFingerprint({ branchId: body.branchId, category, description, amount, paymentMethod: body.paymentMethod });
+    const result = await withTenantTransaction(actor.tenantId, async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
-      const result = await client.query(
-        `INSERT INTO expenses (tenant_id, branch_id, category, description, amount, payment_method, idempotency_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (tenant_id, idempotency_key) DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
-         RETURNING id, category, description, amount::text, payment_method AS "paymentMethod", expense_date AS "expenseDate"`,
-        [actor.tenantId, body.branchId, category, description, amount, body.paymentMethod, key],
+      const prior = await client.query(
+        `SELECT id, request_hash AS "requestHash" FROM expenses WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1`,
+        [actor.tenantId, key],
       );
-      return result.rows[0];
+      if (prior.rowCount) {
+        if (prior.rows[0].requestHash !== requestHash) return { conflict: true as const };
+        const existing = await client.query(
+          `SELECT id, category, description, amount::text, payment_method AS "paymentMethod", expense_date AS "expenseDate" FROM expenses WHERE tenant_id = $1 AND id = $2`,
+          [actor.tenantId, prior.rows[0].id],
+        );
+        return { expense: existing.rows[0], replayed: true as const };
+      }
+      const inserted = await client.query(
+        `INSERT INTO expenses (tenant_id, branch_id, category, description, amount, payment_method, idempotency_key, request_hash)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id, category, description, amount::text, payment_method AS "paymentMethod", expense_date AS "expenseDate"`,
+        [actor.tenantId, body.branchId, category, description, amount, body.paymentMethod, key, requestHash],
+      );
+      return { expense: inserted.rows[0], replayed: false as const };
     });
-    return reply.code(201).send({ expense });
+    if ("conflict" in result && result.conflict) return reply.code(409).send({ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "This Idempotency-Key was already used with a different expense. Use a new key." } });
+    return reply.code(result.replayed ? 200 : 201).send({ expense: result.expense });
   });
 }
