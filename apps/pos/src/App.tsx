@@ -63,6 +63,11 @@ export default function App() {
   const [stockReason, setStockReason] = useState<"damage" | "shrinkage" | "correction" | "opening_balance" | "found_stock" | "other">("opening_balance");
   const [stockNote, setStockNote] = useState("");
   const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>([]);
+  type InventoryCountItem = { id: string; productId: string; productName: string; sku: string; expectedQuantity: number; countedQuantity: number | null; variance: number | null };
+  type InventoryCountSession = { session: { id: string; branchId: string; branchName: string; status: string; createdAt: string }; items: InventoryCountItem[] };
+  const [countSession, setCountSession] = useState<InventoryCountSession | null>(null);
+  const [countInputs, setCountInputs] = useState<Record<string, string>>({});
+  const [countBusy, setCountBusy] = useState(false);
   const [customers, setCustomers] = useState<Party[]>([]);
   const [suppliers, setSuppliers] = useState<Party[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
@@ -353,6 +358,45 @@ export default function App() {
 
 
 
+  async function startInventoryCount() {
+    if (!branchId || countBusy) return;
+    setCountBusy(true); setError(""); setMessage("");
+    try {
+      const created = await api<{ session: { id: string } }>("/api/v1/business/inventory/count-sessions", { method: "POST", body: JSON.stringify({ branchId }) }, tenantId);
+      await loadInventoryCount(created.session.id);
+      setMessage("Stock count started. Recording quantities will not change live stock.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not start stock count."); }
+    finally { setCountBusy(false); }
+  }
+  async function loadInventoryCount(sessionId: string) {
+    const data = await api<InventoryCountSession>(`/api/v1/business/inventory/count-sessions/${sessionId}`, {}, tenantId);
+    setCountSession(data);
+    setCountInputs(Object.fromEntries(data.items.map((item) => [item.id, item.countedQuantity === null ? "" : String(item.countedQuantity)])));
+  }
+  async function saveInventoryCount(itemId: string) {
+    const raw = countInputs[itemId];
+    if (raw === undefined || raw.trim() === "" || !Number.isSafeInteger(Number(raw)) || Number(raw) < 0) { setError("Enter a non-negative whole-number count."); return; }
+    setCountBusy(true); setError(""); setMessage("");
+    try {
+      await api(`/api/v1/business/inventory/count-sessions/${countSession?.session.id}/items/${itemId}`, { method: "PATCH", body: JSON.stringify({ countedQuantity: Number(raw) }) }, tenantId);
+      if (countSession) await loadInventoryCount(countSession.session.id);
+      setMessage("Physical count saved. Live inventory is unchanged until approval.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not save physical count."); }
+    finally { setCountBusy(false); }
+  }
+  async function approveInventoryCount() {
+    if (!countSession || countBusy) return;
+    if (!window.confirm("Approve this stock count and post the audited inventory adjustments?")) return;
+    setCountBusy(true); setError(""); setMessage("");
+    try {
+      const result = await api<{ movementCount: number }>(`/api/v1/business/inventory/count-sessions/${countSession.session.id}/approve`, { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() } }, tenantId);
+      await loadBusinessData();
+      await loadInventoryCount(countSession.session.id);
+      setMessage(`Stock count approved. ${result.movementCount} audited adjustment(s) posted.`);
+    } catch (e) { setError(e instanceof Error ? e.message : "Stock count approval failed."); }
+    finally { setCountBusy(false); }
+  }
+
   async function openInvoice(orderId: string) {
     setInvoiceLoading(true); setError("");
     try {
@@ -634,6 +678,18 @@ export default function App() {
       <div className="panel-card pos-card" id="billing"><div className="panel-heading"><div><span className="eyebrow">COUNTER BILLING</span><h3>Quick sale</h3></div><span className="live-label">● LIVE STOCK</span></div><form className="barcode-search" onSubmit={scanProduct}><input autoFocus value={barcodeSearch} onChange={(e)=>setBarcodeSearch(e.target.value)} placeholder="Scan barcode or enter SKU, then press Enter"/><button>Find / add</button></form><div className="pos-products">{products.filter((p)=>p.availableStock>0).slice(0,8).map((product)=><button key={product.id} className="pos-product" onClick={()=>addToCart(product)}><span>{product.name}</span><b>₹{Number(product.price).toFixed(2)}</b><small>{product.availableStock} available · Add +</small></button>)}</div><div className="sale-summary"><h4>Current bill <span>{cart.reduce((n,l)=>n+l.quantity,0)} items</span></h4><select className="sale-customer" value={selectedCustomerId} onChange={(e)=>setSelectedCustomerId(e.target.value)}><option value="">Walk-in customer</option>{customers.map((customer)=><option key={customer.id} value={customer.id}>{customer.name}{customer.phone ? " · "+customer.phone : ""}</option>)}</select><select className="sale-customer" value={paymentMethod} onChange={(e)=>setPaymentMethod(e.target.value as typeof paymentMethod)}><option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option><option value="bank_transfer">Bank transfer</option><option value="credit">Credit</option></select>{cart.map((line)=>{const product=products.find((p)=>p.id===line.productId);return <div className="bill-line" key={line.productId}><span>{product?.name} × {line.quantity}</span><b>₹{((Number(product?.price??0)*line.quantity)*(1+Number(product?.taxRate??0)/100)).toFixed(2)}</b><button onClick={()=>setCart((current)=>current.filter((x)=>x.productId!==line.productId))}>×</button></div>})}<div className="bill-total"><span>Estimated total</span><strong>₹{cartTotal.toFixed(2)}</strong></div><button className="primary-button" disabled={!cart.length || loading} onClick={()=>void completeSale()}>Complete sale · ₹{cartTotal.toFixed(2)} ↗</button><small>Server verifies final prices and available stock before billing.</small></div></div></section>
 
       <section className="support-grid">
+        <div className="panel-card inventory-count-card">
+          <div className="panel-heading"><div><span className="eyebrow">INVENTORY CONTROL</span><h3>Physical stock count</h3></div><span className="muted">{countSession?.session.status.toUpperCase() ?? "NO ACTIVE COUNT"}</span></div>
+          <p className="muted">Compare shelf quantities with system stock. Saving counts never changes live inventory; owner/admin approval is required to post audited adjustments.</p>
+          {!countSession ? <button type="button" className="secondary-button" onClick={() => void startInventoryCount()} disabled={!branchId || !products.length || countBusy}>Start count for {branches.find((b) => b.id === branchId)?.name ?? "branch"}</button> : <>
+            <div className="report-list"><div><span>Branch</span><b>{countSession.session.branchName}</b></div><div><span>Products</span><b>{countSession.items.length}</b></div><div><span>Counted</span><b>{countSession.items.filter((item) => item.countedQuantity !== null).length} / {countSession.items.length}</b></div><div><span>Variance units</span><b>{countSession.items.reduce((sum, item) => sum + (item.variance ?? 0), 0)}</b></div></div>
+            <div className="count-table"><div className="count-table-head"><span>PRODUCT</span><span>SYSTEM</span><span>PHYSICAL COUNT</span><span>VARIANCE</span><span>ACTION</span></div>
+              {countSession.items.map((item) => <div className="count-table-row" key={item.id}><div><b>{item.productName}</b><small>{item.sku}</small></div><strong>{item.expectedQuantity}</strong><input aria-label={`Physical count for ${item.productName}`} type="number" min="0" step="1" value={countInputs[item.id] ?? ""} disabled={countSession.session.status !== "open"} onChange={(e) => setCountInputs((current) => ({ ...current, [item.id]: e.target.value }))} placeholder="Count"/><strong className={(item.variance ?? 0) < 0 ? "negative" : ""}>{item.variance === null ? "—" : item.variance > 0 ? `+${item.variance}` : item.variance}</strong><button type="button" className="tiny-action" disabled={countBusy || countSession.session.status !== "open" || countInputs[item.id] === ""} onClick={() => void saveInventoryCount(item.id)}>Save</button></div>)}
+            </div>
+            <div className="count-actions"><button type="button" className="secondary-button" onClick={() => void loadInventoryCount(countSession.session.id)} disabled={countBusy}>Refresh count</button>{(activeShop?.role === "owner" || activeShop?.role === "admin") && countSession.session.status === "open" && <button type="button" className="primary-button" onClick={() => void approveInventoryCount()} disabled={countBusy || countSession.items.some((item) => item.countedQuantity === null)}>Approve & post adjustments</button>}</div>
+            <small className="muted">Approval is blocked if stock moved after this count began or if counted stock is below reserved stock. Start a fresh count in that case.</small>
+          </>}
+        </div>
         <div className="panel-card receivables-card" id="receivables">
           <div className="panel-heading"><div><span className="eyebrow">CUSTOMER CREDIT</span><h3>Receivables & collections</h3></div><span className="muted">{receivables.length} OPEN</span></div>
           <div className="report-list"><div><span>Total outstanding</span><b>₹{receivables.reduce((sum, row) => sum + Number(row.outstandingAmount), 0).toFixed(2)}</b></div><div><span>Open credit invoices</span><b>{receivables.length}</b></div></div>
