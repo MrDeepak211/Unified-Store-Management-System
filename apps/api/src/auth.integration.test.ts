@@ -94,15 +94,17 @@ after(async () => {
     await pool.query("DELETE FROM inventory_count_sessions WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM inventory_movements WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM inventory_balances WHERE tenant_id = $1", [tenantA]);
-    await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM inventory_balances WHERE tenant_id = $1", [tenantB]);
-    await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantB]);
     await pool.query("DELETE FROM inventory_balances WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = ANY($1::uuid[]))", [[tenantA, tenantB]]);
     await pool.query("DELETE FROM supplier_payments WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM supplier_purchase_return_items WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM supplier_purchase_returns WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM sales_returns WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM purchase_receipt_items WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM purchase_receipts WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM suppliers WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantA]);
+    await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantB]);
     await pool.query("DELETE FROM inventory_transfers WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM sales_orders WHERE tenant_id = $1", [tenantA]);
     await pool.query("DELETE FROM tenant_memberships WHERE tenant_id = ANY($1::uuid[])", [[tenantA, tenantB]]);
@@ -356,10 +358,19 @@ test("supplier payments reconcile partial balances, reject overpayment and repla
   const supplierId = randomUUID();
   const receiptId = randomUUID();
   await pool.query("INSERT INTO suppliers (id, tenant_id, name) VALUES ($1,$2,'Ledger Test Supplier')", [supplierId, tenantA]);
+  const productId = randomUUID();
+  await pool.query("INSERT INTO products (id, tenant_id, sku, name, price, tax_rate) VALUES ($1,$2,'SUP-RETURN-001','Returnable supplier item',30,0)", [productId, tenantA]);
+  await pool.query("INSERT INTO inventory_balances (tenant_id, branch_id, product_id, on_hand, reserved) VALUES ($1,$2,$3,5,1)", [tenantA, branchA, productId]);
   await pool.query(
     `INSERT INTO purchase_receipts (id, tenant_id, branch_id, supplier_id, receipt_number, status, subtotal, tax_total, grand_total, idempotency_key)
      VALUES ($1,$2,$3,$4,$5,'received',100,0,100,$6)`,
     [receiptId, tenantA, branchA, supplierId, `GRN-${receiptId.slice(0,8)}`, `receipt-${receiptId}`],
+  );
+  const receiptItemId = randomUUID();
+  await pool.query(
+    `INSERT INTO purchase_receipt_items (id,tenant_id,receipt_id,product_id,quantity,unit_cost,tax_rate,line_total)
+     VALUES ($1,$2,$3,$4,5,20,0,100)`,
+    [receiptItemId,tenantA,receiptId,productId],
   );
 
   const paymentHeaders = { ...ownerHeaders, "content-type": "application/json", "idempotency-key": "supplier-payment-key-001" };
@@ -393,19 +404,46 @@ test("supplier payments reconcile partial balances, reject overpayment and repla
   });
   assert.equal(overpayment.statusCode, 409, overpayment.body);
 
+  const purchaseReturn = await app.inject({
+    method: "POST", url: `/api/v1/business/purchases/receipts/${receiptId}/returns`,
+    headers: { ...ownerHeaders, "content-type": "application/json", "idempotency-key": "supplier-return-key-001" },
+    payload: { reason: "Damaged packaging", items: [{ receiptItemId, quantity: 1 }] },
+  });
+  assert.equal(purchaseReturn.statusCode, 201, purchaseReturn.body);
+  assert.equal(purchaseReturn.json().creditNote.creditTotal, "20.00");
+  const returnReplay = await app.inject({
+    method: "POST", url: `/api/v1/business/purchases/receipts/${receiptId}/returns`,
+    headers: { ...ownerHeaders, "content-type": "application/json", "idempotency-key": "supplier-return-key-001" },
+    payload: { reason: "Damaged packaging", items: [{ receiptItemId, quantity: 1 }] },
+  });
+  assert.equal(returnReplay.statusCode, 200, returnReplay.body);
+  assert.equal(returnReplay.json().replayed, true);
+  const overReturn = await app.inject({
+    method: "POST", url: `/api/v1/business/purchases/receipts/${receiptId}/returns`,
+    headers: { ...ownerHeaders, "content-type": "application/json", "idempotency-key": "supplier-return-key-002" },
+    payload: { items: [{ receiptItemId, quantity: 5 }] },
+  });
+  assert.equal(overReturn.statusCode, 409, overReturn.body);
+  const afterReturnStock = await pool.query("SELECT on_hand,reserved FROM inventory_balances WHERE tenant_id=$1 AND branch_id=$2 AND product_id=$3", [tenantA,branchA,productId]);
+  assert.equal(afterReturnStock.rows[0].on_hand, 4);
+  assert.equal(afterReturnStock.rows[0].reserved, 1);
+
   const statement = await app.inject({
     method: "GET", url: `/api/v1/business/suppliers/${supplierId}/statement`, headers: ownerHeaders,
   });
   assert.equal(statement.statusCode, 200, statement.body);
   assert.equal(statement.json().summary.totalPurchased, "100.00");
+  assert.equal(statement.json().summary.totalReturned, "20.00");
   assert.equal(statement.json().summary.totalPaid, "40.00");
-  assert.equal(statement.json().summary.outstanding, "60.00");
-  assert.equal(statement.json().entries.length, 2);
+  assert.equal(statement.json().summary.outstanding, "40.00");
+  assert.equal(statement.json().entries.length, 3);
 
   const supplierList = await app.inject({ method: "GET", url: "/api/v1/business/suppliers", headers: ownerHeaders });
   const supplier = supplierList.json().suppliers.find((row: { id: string }) => row.id === supplierId);
-  assert.equal(supplier.outstanding, "60.00");
+  assert.equal(supplier.outstanding, "40.00");
 
   const paymentCount = await pool.query("SELECT COUNT(*)::int AS count FROM supplier_payments WHERE tenant_id=$1 AND supplier_id=$2", [tenantA, supplierId]);
   assert.equal(paymentCount.rows[0].count, 1, "idempotent replay must not create a duplicate supplier payment");
+  const returnCount = await pool.query("SELECT COUNT(*)::int AS count FROM supplier_purchase_returns WHERE tenant_id=$1 AND supplier_id=$2", [tenantA,supplierId]);
+  assert.equal(returnCount.rows[0].count, 1, "idempotent replay must not create a duplicate supplier credit note");
 });
