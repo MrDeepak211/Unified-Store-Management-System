@@ -5,7 +5,7 @@ import { withTenantTransaction } from "../db.js";
 
 type CollectionBody = { amount?: string | number; paymentMethod?: "cash" | "upi" | "card" | "bank_transfer"; reference?: string };
 function cents(value: string): bigint {
-  const match = /^(\\d+)(?:\\.(\\d{1,2}))?$/.exec(value);
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value);
   if (!match) throw new Error("Invalid stored money amount.");
   return BigInt(match[1]) * 100n + BigInt((match[2] ?? "").padEnd(2, "0") || "0");
 }
@@ -43,7 +43,7 @@ export async function registerReceivableRoutes(app: FastifyInstance) {
     if (typeof key !== "string" || key.length < 8 || key.length > 128) return reply.code(400).send({ error: { code: "IDEMPOTENCY_KEY_REQUIRED", message: "A unique Idempotency-Key is required." } });
     const amount = String(body.amount ?? "");
     const paymentMethod = body.paymentMethod;
-    if (!/^\\d+(\\.\\d{1,2})?$/.test(amount) || cents(amount) <= 0n || !paymentMethod || !["cash","upi","card","bank_transfer"].includes(paymentMethod)) {
+    if (!/^\d+(\.\d{1,2})?$/.test(amount) || cents(amount) <= 0n || !paymentMethod || !["cash","upi","card","bank_transfer"].includes(paymentMethod)) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Enter a positive amount and a valid collection method." } });
     }
     const reference = body.reference?.trim().slice(0, 120) || null;
