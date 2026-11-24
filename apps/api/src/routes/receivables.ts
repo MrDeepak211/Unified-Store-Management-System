@@ -65,7 +65,10 @@ export async function registerReceivableRoutes(app: FastifyInstance) {
       if (prior.rowCount) {
         if (prior.rows[0].request_hash !== requestHash) return { conflict: true as const };
         const totals = await client.query("SELECT COALESCE(SUM(amount),0)::text AS collected FROM pos_credit_collections WHERE tenant_id = $1 AND sales_order_id = $2", [actor.tenantId, request.params.saleId]);
-        return { replayed: true as const, collectionId: prior.rows[0].id, collectedAmount: totals.rows[0].collected };
+        const collected = cents(totals.rows[0].collected);
+        const total = cents(sale.rows[0].grandTotal);
+        const outstanding = total - collected;
+        return { replayed: true as const, collectionId: prior.rows[0].id, collectedAmount: money(collected), outstandingAmount: money(outstanding), paymentStatus: outstanding === 0n ? "paid" as const : "pending" as const };
       }
       const totals = await client.query("SELECT COALESCE(SUM(amount),0)::text AS collected FROM pos_credit_collections WHERE tenant_id = $1 AND sales_order_id = $2", [actor.tenantId, request.params.saleId]);
       let settlement: ReturnType<typeof applyCreditCollection>;
