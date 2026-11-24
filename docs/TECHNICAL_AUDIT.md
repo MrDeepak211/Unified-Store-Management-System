@@ -101,3 +101,24 @@ Both changes passed the GitHub Actions validation workflow, including PostgreSQL
 The receivables backend is implemented, but the cashier-facing receivables screen, customer collection history and printable collection receipt still need implementation and acceptance testing. Route-level integration tests for the new receivables endpoints should be expanded beyond the current pure arithmetic coverage. Payment-method reporting for UPI, card and bank-transfer collections should also be reviewed so cashbook categories reconcile correctly.
 
 The work above is code and disposable-CI verified only. It does not establish hosted staging runtime verification or production readiness. Hosted database/provider integration remains intentionally deferred.
+
+
+## Inventory count reconciliation and supplier payment ledger — 2026-11-24
+
+### Physical inventory count and reconciliation
+
+Branch-scoped stock-count sessions now snapshot system quantities without changing live stock. Authorized staff can record physical quantities; only owners/admins can approve. Approval locks the session and stock rows, rejects incomplete or stale snapshots, prevents counts below reserved stock, and writes audited adjustment movements. Approval is request-key idempotent. The POS count workflow displays expected, counted and variance quantities and requires explicit approval.
+
+Integration coverage now exercises tenant/branch boundaries, role permissions, incomplete counts, stale-stock atomicity, reserved-stock preservation, approval replay and audit movement uniqueness. See [PR #17 — inventory reconciliation integration tests](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/17).
+
+### Supplier payments and statements
+
+Supplier payments are recorded in a separate tenant-scoped ledger with branch, actor, payment method, reference, notes and request fingerprint. Partial payments reduce supplier outstanding balances; overpayments are rejected using integer-cent arithmetic. Replaying the same idempotency key returns the original payment, while reusing a key for different details conflicts. Supplier statements present purchase receipts as debits and payments as credits with a running balance. Supplier list totals respect the actor's branch scope.
+
+Purchase receipt creation increases inventory and records supplier liability; it does not itself represent a cash payment. Only actual cash supplier payments are included in cashbook cash-out. UPI, card and bank-transfer supplier payments remain separately identified and are not misreported as cash. See [PR #18 — supplier payment ledger and statements](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/18).
+
+### Verification and remaining limitations
+
+PR #17 and PR #18 passed the repository GitHub Actions validation workflow against disposable CI PostgreSQL, including migrations, API integration tests, typecheck and monorepo build. This is code-level CI verification only. No hosted staging database, production deployment, live customer data or payment provider transaction was used.
+
+Supplier ledger scope currently records supplier-level aggregate payments rather than allocating each payment to a particular purchase receipt. Supplier credit notes, purchase returns, payment reversals/refunds, GST input-credit treatment and a full three-way supplier statement reconciliation remain future work. Do not treat this feature as an accounting or tax certification.
