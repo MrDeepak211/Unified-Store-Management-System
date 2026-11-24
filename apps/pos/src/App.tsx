@@ -12,6 +12,7 @@ type CartLine = { productId: string; quantity: number };
 type Party = { id: string; name: string; phone?: string | null };
 type Receipt = { id: string; receiptNumber: string; supplierName?: string | null; grandTotal: string; createdAt: string };
 type Sale = { id: string; orderNumber: string; status: string; channel: string; grandTotal: string; items: Array<{ productId: string; quantity: number }> };
+type Receivable = { saleId: string; orderNumber: string; customerName?: string | null; customerPhone?: string | null; grandTotal: string; collectedAmount: string; outstandingAmount: string; createdAt: string; branchName: string };
 type Overview = { today: { posSalesCount: number; posRevenue: string; purchaseSpend: string; expenseSpend: string; cashIn: string; cashOut: string; netCash: string }; inventory: { available: number; low_stock: number }; online: { pendingOrders: number } };
 type Expense = { id: string; category: string; description: string; amount: string; paymentMethod: string; expenseDate: string };
 type StoreSettings = { displayName: string; primaryColor: string; supportEmail?: string | null; supportPhone?: string | null; isPublished: boolean };
@@ -108,6 +109,12 @@ export default function App() {
   const [inviteBranchIds, setInviteBranchIds] = useState<string[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceDetail | null>(null);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [receivables, setReceivables] = useState<Receivable[]>([]);
+  const [collectionSaleId, setCollectionSaleId] = useState("");
+  const [collectionAmount, setCollectionAmount] = useState("");
+  const [collectionMethod, setCollectionMethod] = useState<"cash" | "upi" | "card" | "bank_transfer">("cash");
+  const [collectionReference, setCollectionReference] = useState("");
+  const [collectionSaving, setCollectionSaving] = useState(false);
 
   useEffect(() => {
     if (!supabase) { setAuthReady(true); return; }
@@ -183,7 +190,7 @@ export default function App() {
       if (activeBranchId && activeBranchId !== branchId) setBranchId(activeBranchId);
       setFromBranchId((current) => current || activeBranchId);
       setToBranchId((current) => current || branchData.branches.find((branch) => branch.id !== activeBranchId)?.id || "");
-      const [productData, customerData, supplierData, receiptData, salesData, reportData, storeData, gatewayData, profileData, invoiceData, categoryData, onlineOrderData, expenseData] = await Promise.all([
+      const [productData, customerData, supplierData, receiptData, salesData, reportData, storeData, gatewayData, profileData, invoiceData, categoryData, onlineOrderData, expenseData, receivableData] = await Promise.all([
         api<{ products: Product[] }>(`/api/v1/business/products?branchId=${encodeURIComponent(activeBranchId)}`, {}, selectedTenant),
         api<{ customers: Party[] }>("/api/v1/business/customers", {}, selectedTenant),
         api<{ suppliers: Party[] }>("/api/v1/business/suppliers", {}, selectedTenant),
@@ -197,6 +204,7 @@ export default function App() {
         api<{ categories: Array<{id:string;name:string}> }>("/api/v1/business/categories", {}, selectedTenant),
         api<{ orders: OnlineOrder[] }>("/api/v1/business/online-orders", {}, selectedTenant),
         api<{ expenses: Expense[] }>("/api/v1/business/expenses", {}, selectedTenant),
+        api<{ receivables: Receivable[] }>("/api/v1/business/receivables", {}, selectedTenant),
       ]);
       setProducts(productData.products);
       setStockProductId((current) => current || productData.products[0]?.id || "");
@@ -221,6 +229,9 @@ export default function App() {
       setCategories(categoryData.categories);
       setOnlineOrders(onlineOrderData.orders);
       setExpenses(expenseData.expenses);
+      setReceivables(receivableData.receivables);
+      setCollectionSaleId((current) => receivableData.receivables.some((row) => row.saleId === current) ? current : receivableData.receivables[0]?.saleId ?? "");
+      setCollectionAmount((current) => current || receivableData.receivables[0]?.outstandingAmount || "");
       setPurchaseProductId((current) => current || productData.products[0]?.id || "");
       setError("");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not load shop data."); }
@@ -525,6 +536,28 @@ export default function App() {
     } catch (e) { setError(e instanceof Error ? e.message : "Return could not be processed."); }
   }
 
+  async function recordCreditCollection(event: FormEvent) {
+    event.preventDefault();
+    if (!collectionSaleId || !collectionAmount || collectionSaving) return;
+    setCollectionSaving(true); setError(""); setMessage("");
+    try {
+      const result = await api<{ collectedAmount: string; outstandingAmount: string; paymentStatus: string }>(`/api/v1/business/sales/${collectionSaleId}/collections`, {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({ amount: collectionAmount, paymentMethod: collectionMethod, reference: collectionReference || undefined }),
+      }, tenantId);
+      await loadBusinessData();
+      setCollectionAmount("");
+      setCollectionReference("");
+      setMessage(result.outstandingAmount === "0.00"
+        ? "Credit invoice fully settled. Payment status is now PAID."
+        : `Collection recorded. Remaining balance: ₹${Number(result.outstandingAmount).toFixed(2)}.`);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not record customer collection."); }
+    finally { setCollectionSaving(false); }
+  }
+
+  const selectedReceivable = receivables.find((row) => row.saleId === collectionSaleId);
+
   const cartTotal = useMemo(() => cart.reduce((sum, line) => {
     const product = products.find((item) => item.id === line.productId);
     return sum + (product ? Number(product.price) * line.quantity * (1 + Number(product.taxRate) / 100) : 0);
@@ -591,6 +624,27 @@ export default function App() {
       <div className="panel-card pos-card" id="billing"><div className="panel-heading"><div><span className="eyebrow">COUNTER BILLING</span><h3>Quick sale</h3></div><span className="live-label">● LIVE STOCK</span></div><form className="barcode-search" onSubmit={scanProduct}><input autoFocus value={barcodeSearch} onChange={(e)=>setBarcodeSearch(e.target.value)} placeholder="Scan barcode or enter SKU, then press Enter"/><button>Find / add</button></form><div className="pos-products">{products.filter((p)=>p.availableStock>0).slice(0,8).map((product)=><button key={product.id} className="pos-product" onClick={()=>addToCart(product)}><span>{product.name}</span><b>₹{Number(product.price).toFixed(2)}</b><small>{product.availableStock} available · Add +</small></button>)}</div><div className="sale-summary"><h4>Current bill <span>{cart.reduce((n,l)=>n+l.quantity,0)} items</span></h4><select className="sale-customer" value={selectedCustomerId} onChange={(e)=>setSelectedCustomerId(e.target.value)}><option value="">Walk-in customer</option>{customers.map((customer)=><option key={customer.id} value={customer.id}>{customer.name}{customer.phone ? " · "+customer.phone : ""}</option>)}</select><select className="sale-customer" value={paymentMethod} onChange={(e)=>setPaymentMethod(e.target.value as typeof paymentMethod)}><option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option><option value="bank_transfer">Bank transfer</option><option value="credit">Credit</option></select>{cart.map((line)=>{const product=products.find((p)=>p.id===line.productId);return <div className="bill-line" key={line.productId}><span>{product?.name} × {line.quantity}</span><b>₹{((Number(product?.price??0)*line.quantity)*(1+Number(product?.taxRate??0)/100)).toFixed(2)}</b><button onClick={()=>setCart((current)=>current.filter((x)=>x.productId!==line.productId))}>×</button></div>})}<div className="bill-total"><span>Estimated total</span><strong>₹{cartTotal.toFixed(2)}</strong></div><button className="primary-button" disabled={!cart.length || loading} onClick={()=>void completeSale()}>Complete sale · ₹{cartTotal.toFixed(2)} ↗</button><small>Server verifies final prices and available stock before billing.</small></div></div></section>
 
       <section className="support-grid">
+        <div className="panel-card receivables-card" id="receivables">
+          <div className="panel-heading"><div><span className="eyebrow">CUSTOMER CREDIT</span><h3>Receivables & collections</h3></div><span className="muted">{receivables.length} OPEN</span></div>
+          <div className="report-list"><div><span>Total outstanding</span><b>₹{receivables.reduce((sum, row) => sum + Number(row.outstandingAmount), 0).toFixed(2)}</b></div><div><span>Open credit invoices</span><b>{receivables.length}</b></div></div>
+          {receivables.length ? <>
+            <div className="mini-records receivable-list">{receivables.map((row) => <button type="button" className={row.saleId === collectionSaleId ? "receivable-row selected" : "receivable-row"} key={row.saleId} onClick={() => { setCollectionSaleId(row.saleId); setCollectionAmount(row.outstandingAmount); }}>
+              <span><b>{row.customerName || "Walk-in customer"} · {row.orderNumber}</b><small>{row.customerPhone || "No phone"} · {row.branchName} · {new Date(row.createdAt).toLocaleDateString("en-IN")}</small></span>
+              <span><b>₹{Number(row.outstandingAmount).toFixed(2)}</b><small>of ₹{Number(row.grandTotal).toFixed(2)} · collected ₹{Number(row.collectedAmount).toFixed(2)}</small></span>
+            </button>)}</div>
+            <form className="inline-form" onSubmit={recordCreditCollection}>
+              <h4>Record customer payment</h4>
+              <p className="muted">{selectedReceivable ? `${selectedReceivable.orderNumber} · Balance ₹${Number(selectedReceivable.outstandingAmount).toFixed(2)}` : "Select an outstanding invoice above."}</p>
+              <div className="form-grid">
+                <input aria-label="Collection amount" type="number" min="0.01" max={selectedReceivable?.outstandingAmount} step="0.01" value={collectionAmount} onChange={(e)=>setCollectionAmount(e.target.value)} required placeholder="Amount received ₹"/>
+                <select aria-label="Collection payment method" value={collectionMethod} onChange={(e)=>setCollectionMethod(e.target.value as typeof collectionMethod)}><option value="cash">Cash</option><option value="upi">UPI</option><option value="card">Card</option><option value="bank_transfer">Bank transfer</option></select>
+                <input aria-label="Payment reference" value={collectionReference} onChange={(e)=>setCollectionReference(e.target.value)} maxLength={120} placeholder="Reference / UTR (optional)"/>
+              </div>
+              <button className="primary-button" disabled={!selectedReceivable || !collectionAmount || Number(collectionAmount) <= 0 || Number(collectionAmount) > Number(selectedReceivable.outstandingAmount) || collectionSaving}>{collectionSaving ? "Saving collection…" : "Record collection ↗"}</button>
+              <small className="muted">Only money actually received should be recorded. The server prevents duplicate requests and over-collection.</small>
+            </form>
+          </> : <p className="muted">No outstanding credit invoices. New POS credit sales will appear here.</p>}
+        </div>
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">RELATIONSHIPS</span><h3>Customers & suppliers</h3></div></div>
           <form className="inline-form" onSubmit={addCustomer}><h4>Add customer</h4><div className="form-grid"><input value={newCustomerName} onChange={(e)=>setNewCustomerName(e.target.value)} required placeholder="Customer name"/><input value={newCustomerPhone} onChange={(e)=>setNewCustomerPhone(e.target.value)} placeholder="Mobile number"/></div><button className="secondary-button">Save customer</button></form>
           <form className="inline-form" onSubmit={addSupplier}><h4>Add supplier</h4><div className="form-grid"><input value={newSupplierName} onChange={(e)=>setNewSupplierName(e.target.value)} required placeholder="Supplier name"/><input value={newSupplierPhone} onChange={(e)=>setNewSupplierPhone(e.target.value)} placeholder="Mobile number"/></div><button className="secondary-button">Save supplier</button></form>
