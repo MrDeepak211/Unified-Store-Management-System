@@ -63,3 +63,5 @@
 .error-alert{background:#351B1B;color:#FFAAA0}
 .invoice-overlay{background:#080809E8}
 @media(max-width:700px){.sidebar{background:#080809;border-bottom:1px solid var(--usms-line)}}
+
+.receivable-list{display:grid;gap:7px;margin:12px 0}.receivable-row{width:100%;display:flex;justify-content:space-between;align-items:center;gap:12px;text-align:left;padding:12px;border:1px solid var(--usms-line);border-radius:7px;background:#101013;color:#F4F4F5;cursor:pointer}.receivable-row>span{display:grid;gap:5px;min-width:0}.receivable-row>span:last-child{text-align:right;flex-shrink:0}.receivable-row b{font:600 11px 'DM Sans';color:#F4F4F5}.receivable-row small{font:9px 'DM Sans';color:var(--usms-muted)}.receivable-row.selected,.receivable-row:hover{border-color:var(--usms-lime);background:#1a1f10}.receivable-row>span:last-child>b{font:700 12px 'DM Mono';color:var(--usms-lime)}.receivables-card .primary-button{margin-top:10px}
