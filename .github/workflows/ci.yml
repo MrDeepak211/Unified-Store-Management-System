@@ -58,7 +58,7 @@ jobs:
       - name: Test idempotency request fingerprints
         run: pnpm --filter @usms/api test:idempotency
       - name: Test POS offline queue tenant isolation
-        run: pnpm --filter @usms/api test:offline-queue
+        run: pnpm --filter @usms/pos test:offline-queue
       - name: Typecheck
         run: pnpm typecheck
       - name: Build
