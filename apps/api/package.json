@@ -14,7 +14,7 @@
     "test:auth-integration": "tsx --test src/auth.integration.test.ts",
     "test:payments": "tsx --test src/routes/refundPolicy.test.ts",
     "test:idempotency": "tsx --test src/idempotency.test.ts",
-    "test:offline-queue": "tsx --test ../pos/src/offlineQueuePolicy.test.ts"
+    "test:offline-queue": "tsx --test src/offlineQueuePolicy.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
