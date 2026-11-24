@@ -163,8 +163,8 @@ export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
                     + COALESCE((SELECT SUM(p.amount) FROM supplier_payments p
                       WHERE p.tenant_id=$1 AND p.payment_method='cash'
                         AND ($2::uuid[] IS NULL OR p.branch_id=ANY($2))
-                        AND p.created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata')
-                        AND p.created_at < date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '1 day'),0)
+                        AND p.created_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata')
+                        AND p.created_at < ((date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') + interval '1 day') AT TIME ZONE 'Asia/Kolkata')),0)
                   )::text AS cash_out
            FROM expenses WHERE tenant_id = $1 AND ($2::uuid[] IS NULL OR branch_id = ANY($2))
              AND expense_date = (now() AT TIME ZONE 'Asia/Kolkata')::date`,
