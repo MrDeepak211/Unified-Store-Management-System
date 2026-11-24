@@ -35,10 +35,13 @@ export async function registerInventoryTransferRoutes(app: FastifyInstance) {
         );
         if (branches.rowCount !== 2) throw Object.assign(new Error("Both branches must belong to this shop."), { statusCode: 404 });
         const prior = await client.query(
-          "SELECT id, transfer_number AS \"transferNumber\", status FROM inventory_transfers WHERE tenant_id = $1 AND idempotency_key = $2",
+          "SELECT id, transfer_number, status, request_hash FROM inventory_transfers WHERE tenant_id = $1 AND idempotency_key = $2",
           [actor.tenantId, key],
         );
-        if (prior.rowCount) { if (prior.rows[0].requestHash !== requestHash) return { conflict: true as const }; return { transfer: prior.rows[0], replayed: true as const }; }
+        if (prior.rowCount) {
+          if (prior.rows[0].request_hash !== requestHash) return { conflict: true as const };
+          return { transfer: { id: prior.rows[0].id, transferNumber: prior.rows[0].transfer_number, status: prior.rows[0].status }, replayed: true as const };
+        }
         const transferId = randomUUID();
         const transferNumber = `TRF-${randomUUID().slice(0, 8).toUpperCase()}`;
         await client.query(
