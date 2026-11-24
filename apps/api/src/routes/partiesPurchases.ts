@@ -80,9 +80,11 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
       const result = await client.query(
         `SELECT s.id, s.name, s.phone, s.email, s.gstin, s.address, s.created_at AS "createdAt",
                 COALESCE((SELECT SUM(r.grand_total) FROM purchase_receipts r
-                  WHERE r.tenant_id=s.tenant_id AND r.supplier_id=s.id AND r.status='received'),0)::text AS "totalPurchased",
+                  WHERE r.tenant_id=s.tenant_id AND r.supplier_id=s.id AND r.status='received'
+                    AND ($2::uuid[] IS NULL OR r.branch_id=ANY($2))),0)::text AS "totalPurchased",
                 COALESCE((SELECT SUM(p.amount) FROM supplier_payments p
-                  WHERE p.tenant_id=s.tenant_id AND p.supplier_id=s.id),0)::text AS "totalPaid",
+                  WHERE p.tenant_id=s.tenant_id AND p.supplier_id=s.id
+                    AND ($2::uuid[] IS NULL OR p.branch_id=ANY($2))),0)::text AS "totalPaid",
                 GREATEST(
                   COALESCE((SELECT SUM(r.grand_total) FROM purchase_receipts r
                     WHERE r.tenant_id=s.tenant_id AND r.supplier_id=s.id AND r.status='received'),0)
@@ -90,7 +92,7 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
                     WHERE p.tenant_id=s.tenant_id AND p.supplier_id=s.id),0),0
                 )::text AS "outstanding"
          FROM suppliers s WHERE s.tenant_id = $1 ORDER BY s.created_at DESC LIMIT 500`,
-        [actor.tenantId],
+        [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
       );
       return { suppliers: result.rows };
     });
