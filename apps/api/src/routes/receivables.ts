@@ -33,7 +33,19 @@ export async function registerReceivableRoutes(app: FastifyInstance) {
          ORDER BY o.created_at DESC LIMIT 250`,
         [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
       );
-      return { receivables: result.rows };
+      const history = await client.query(
+        `SELECT c.id AS "collectionId", c.sales_order_id AS "saleId", o.order_number AS "orderNumber",
+                o.customer_name AS "customerName", o.customer_phone AS "customerPhone",
+                c.amount::text AS amount, c.payment_method AS "paymentMethod", c.reference,
+                c.collected_at AS "collectedAt", b.name AS "branchName"
+         FROM pos_credit_collections c
+         JOIN sales_orders o ON o.tenant_id = c.tenant_id AND o.id = c.sales_order_id
+         JOIN branches b ON b.tenant_id = o.tenant_id AND b.id = o.branch_id
+         WHERE c.tenant_id = $1 AND ($2::uuid[] IS NULL OR o.branch_id = ANY($2))
+         ORDER BY c.collected_at DESC LIMIT 100`,
+        [actor.tenantId, actor.branchIds.length ? actor.branchIds : null],
+      );
+      return { receivables: result.rows, collectionHistory: history.rows };
     });
   });
 

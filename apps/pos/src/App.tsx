@@ -13,6 +13,7 @@ type Party = { id: string; name: string; phone?: string | null };
 type Receipt = { id: string; receiptNumber: string; supplierName?: string | null; grandTotal: string; createdAt: string };
 type Sale = { id: string; orderNumber: string; status: string; channel: string; grandTotal: string; items: Array<{ productId: string; quantity: number }> };
 type Receivable = { saleId: string; orderNumber: string; customerName?: string | null; customerPhone?: string | null; grandTotal: string; collectedAmount: string; outstandingAmount: string; createdAt: string; branchName: string };
+type CollectionRecord = { collectionId: string; saleId: string; orderNumber: string; customerName?: string | null; customerPhone?: string | null; amount: string; paymentMethod: string; reference?: string | null; collectedAt: string; branchName: string };
 type Overview = { today: { posSalesCount: number; posRevenue: string; purchaseSpend: string; expenseSpend: string; cashIn: string; cashOut: string; netCash: string }; inventory: { available: number; low_stock: number }; online: { pendingOrders: number } };
 type Expense = { id: string; category: string; description: string; amount: string; paymentMethod: string; expenseDate: string };
 type StoreSettings = { displayName: string; primaryColor: string; supportEmail?: string | null; supportPhone?: string | null; isPublished: boolean };
@@ -115,6 +116,8 @@ export default function App() {
   const [collectionMethod, setCollectionMethod] = useState<"cash" | "upi" | "card" | "bank_transfer">("cash");
   const [collectionReference, setCollectionReference] = useState("");
   const [collectionSaving, setCollectionSaving] = useState(false);
+  const [collectionHistory, setCollectionHistory] = useState<CollectionRecord[]>([]);
+  const [selectedCollectionReceipt, setSelectedCollectionReceipt] = useState<CollectionRecord | null>(null);
 
   useEffect(() => {
     if (!supabase) { setAuthReady(true); return; }
@@ -204,7 +207,7 @@ export default function App() {
         api<{ categories: Array<{id:string;name:string}> }>("/api/v1/business/categories", {}, selectedTenant),
         api<{ orders: OnlineOrder[] }>("/api/v1/business/online-orders", {}, selectedTenant),
         api<{ expenses: Expense[] }>("/api/v1/business/expenses", {}, selectedTenant),
-        api<{ receivables: Receivable[] }>("/api/v1/business/receivables", {}, selectedTenant),
+        api<{ receivables: Receivable[]; collectionHistory: CollectionRecord[] }>("/api/v1/business/receivables", {}, selectedTenant),
       ]);
       setProducts(productData.products);
       setStockProductId((current) => current || productData.products[0]?.id || "");
@@ -230,6 +233,7 @@ export default function App() {
       setOnlineOrders(onlineOrderData.orders);
       setExpenses(expenseData.expenses);
       setReceivables(receivableData.receivables);
+      setCollectionHistory(receivableData.collectionHistory);
       setCollectionSaleId((current) => receivableData.receivables.some((row) => row.saleId === current) ? current : receivableData.receivables[0]?.saleId ?? "");
       setCollectionAmount((current) => current || receivableData.receivables[0]?.outstandingAmount || "");
       setPurchaseProductId((current) => current || productData.products[0]?.id || "");
@@ -644,6 +648,13 @@ export default function App() {
               <small className="muted">Only money actually received should be recorded. The server prevents duplicate requests and over-collection.</small>
             </form>
           </> : <p className="muted">No outstanding credit invoices. New POS credit sales will appear here.</p>}
+          <div className="inline-form">
+            <h4>Recent customer collections</h4>
+            {collectionHistory.length ? <div className="mini-records">{collectionHistory.slice(0,12).map((record) => <div key={record.collectionId}>
+              <span><b>{record.customerName || "Walk-in customer"} · {record.orderNumber}</b><small>{new Date(record.collectedAt).toLocaleString("en-IN")} · {record.paymentMethod.toUpperCase()} {record.reference ? "· "+record.reference : ""}</small></span>
+              <span><b>₹{Number(record.amount).toFixed(2)}</b><button type="button" className="tiny-action" onClick={() => setSelectedCollectionReceipt(record)}>Print receipt</button></span>
+            </div>)}</div> : <p className="muted">No collections recorded yet.</p>}
+          </div>
         </div>
         <div className="panel-card"><div className="panel-heading"><div><span className="eyebrow">RELATIONSHIPS</span><h3>Customers & suppliers</h3></div></div>
           <form className="inline-form" onSubmit={addCustomer}><h4>Add customer</h4><div className="form-grid"><input value={newCustomerName} onChange={(e)=>setNewCustomerName(e.target.value)} required placeholder="Customer name"/><input value={newCustomerPhone} onChange={(e)=>setNewCustomerPhone(e.target.value)} placeholder="Mobile number"/></div><button className="secondary-button">Save customer</button></form>
@@ -703,6 +714,22 @@ export default function App() {
         </div>
       </section>
 
+    {selectedCollectionReceipt && <div className="invoice-overlay"><div className="collection-receipt-print">
+      <div className="invoice-toolbar"><span>PAYMENT RECEIPT · {selectedCollectionReceipt.collectionId.slice(0,8).toUpperCase()}</span><div><button onClick={()=>window.print()}>Print / Save PDF</button><button onClick={()=>setSelectedCollectionReceipt(null)}>Close</button></div></div>
+      <div className="collection-receipt-paper">
+        <span className="eyebrow">USMS · CUSTOMER PAYMENT</span>
+        <h2>Payment receipt</h2>
+        <div className="receipt-amount">₹{Number(selectedCollectionReceipt.amount).toFixed(2)}</div>
+        <p>Received from <b>{selectedCollectionReceipt.customerName || "Walk-in customer"}</b></p>
+        <p>Against invoice <b>{selectedCollectionReceipt.orderNumber}</b></p>
+        <p>Branch: {selectedCollectionReceipt.branchName}</p>
+        <p>Payment method: {selectedCollectionReceipt.paymentMethod.replace("_"," ").toUpperCase()}</p>
+        {selectedCollectionReceipt.reference && <p>Reference / UTR: {selectedCollectionReceipt.reference}</p>}
+        <p>Received on: {new Date(selectedCollectionReceipt.collectedAt).toLocaleString("en-IN")}</p>
+        <p>Receipt ID: {selectedCollectionReceipt.collectionId}</p>
+        <div className="receipt-thanks">Thank you. Payment recorded successfully.</div>
+      </div>
+    </div></div>}
     {selectedInvoice && <div className="invoice-overlay"><div className="invoice-print">
       <div className="invoice-toolbar"><span>INVOICE PREVIEW · {selectedInvoice.invoice.invoiceNumber}</span><div><button onClick={()=>window.print()}>Print / Save PDF</button><button onClick={()=>setSelectedInvoice(null)}>Close</button></div></div>
       <div className="invoice-paper"><div className="invoice-paper-head"><div><span className="eyebrow">USMS · SALES DOCUMENT</span><h2>{String(selectedInvoice.invoice.issuer?.legalName ?? selectedInvoice.invoice.issuer?.shopName ?? activeShop?.shopName ?? "Store")}</h2><p>{String(selectedInvoice.invoice.issuer?.gstin ?? "GSTIN not provided")} · State {String(selectedInvoice.invoice.issuer?.stateCode ?? "—")}</p></div><div className="invoice-number"><span>SALES INVOICE</span><b>{selectedInvoice.invoice.invoiceNumber}</b><small>{new Date(selectedInvoice.invoice.issuedAt).toLocaleString("en-IN")}</small></div></div>
