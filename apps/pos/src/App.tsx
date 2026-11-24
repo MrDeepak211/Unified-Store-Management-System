@@ -137,7 +137,7 @@ export default function App() {
     if (!session || !tenantId || !navigator.onLine) return;
     const rows = await listPendingSales();
     for (const row of rows) {
-      if (isLegacyUnscopedSale(row)) {
+      if (row.status === "pending" && isLegacyUnscopedSale(row)) {
         await markPendingSaleFailed(row.id, "This older offline sale has no saved shop ID. It was not uploaded; manually reconcile it with the original shop.");
         setError("An older offline sale needs manual review because its original shop could not be identified safely.");
         continue;
