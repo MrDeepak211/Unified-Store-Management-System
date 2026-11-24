@@ -2,6 +2,7 @@ import { createRequestFingerprint } from "../idempotency.js";
 import type { FastifyInstance } from "fastify";
 import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
+import { applyCreditCollection } from "../receivableMath.js";
 
 type CollectionBody = { amount?: string | number; paymentMethod?: "cash" | "upi" | "card" | "bank_transfer"; reference?: string };
 function cents(value: string): bigint {
@@ -67,19 +68,20 @@ export async function registerReceivableRoutes(app: FastifyInstance) {
         return { replayed: true as const, collectionId: prior.rows[0].id, collectedAmount: totals.rows[0].collected };
       }
       const totals = await client.query("SELECT COALESCE(SUM(amount),0)::text AS collected FROM pos_credit_collections WHERE tenant_id = $1 AND sales_order_id = $2", [actor.tenantId, request.params.saleId]);
-      const alreadyCollected = cents(totals.rows[0].collected);
-      const total = cents(sale.rows[0].grandTotal);
+      let settlement: ReturnType<typeof applyCreditCollection>;
+      try {
+        settlement = applyCreditCollection(sale.rows[0].grandTotal, totals.rows[0].collected, amount);
+      } catch (error) {
+        throw Object.assign(new Error(error instanceof Error ? error.message : "Invalid collection amount."), { statusCode: 409 });
+      }
       const received = cents(amount);
-      if (received > total - alreadyCollected) throw Object.assign(new Error("Collection exceeds the outstanding balance."), { statusCode: 409 });
       const inserted = await client.query(
         `INSERT INTO pos_credit_collections (tenant_id, sales_order_id, amount, payment_method, reference, idempotency_key, request_hash)
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
         [actor.tenantId, request.params.saleId, money(received), paymentMethod, reference, key, requestHash],
       );
-      const collected = alreadyCollected + received;
-      const outstanding = total - collected;
-      if (outstanding === 0n) await client.query("UPDATE sales_orders SET payment_status = 'paid' WHERE tenant_id = $1 AND id = $2", [actor.tenantId, request.params.saleId]);
-      return { replayed: false as const, collectionId: inserted.rows[0].id, collectedAmount: money(collected), outstandingAmount: money(outstanding), paymentStatus: outstanding === 0n ? "paid" : "pending" };
+      if (settlement.paymentStatus === "paid") await client.query("UPDATE sales_orders SET payment_status = 'paid' WHERE tenant_id = $1 AND id = $2", [actor.tenantId, request.params.saleId]);
+      return { replayed: false as const, collectionId: inserted.rows[0].id, ...settlement };
     });
     if ("conflict" in result && result.conflict) return reply.code(409).send({ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "This Idempotency-Key was already used with a different collection." } });
     return reply.code(result.replayed ? 200 : 201).send(result);
