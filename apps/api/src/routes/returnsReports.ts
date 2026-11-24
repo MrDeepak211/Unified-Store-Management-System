@@ -60,8 +60,14 @@ export async function registerReturnsAndReportsRoutes(app: FastifyInstance) {
       );
       if (!sale.rowCount) throw Object.assign(new Error("Sale not found or not eligible for return."), { statusCode: 404 });
       assertBranchAccess(actor, sale.rows[0].branch_id);
-      const prior = await client.query("SELECT id, return_number AS \"returnNumber\", total::text, request_hash AS \\"requestHash\\" FROM sales_returns WHERE tenant_id = $1 AND idempotency_key = $2", [actor.tenantId, key]);
-      if (prior.rowCount) { if (prior.rows[0].requestHash !== requestHash) return { conflict: true as const }; return { returnRecord: prior.rows[0], replayed: true as const }; }
+      const prior = await client.query(
+        "SELECT id, return_number, total::text, request_hash FROM sales_returns WHERE tenant_id = $1 AND idempotency_key = $2",
+        [actor.tenantId, key],
+      );
+      if (prior.rowCount) {
+        if (prior.rows[0].request_hash !== requestHash) return { conflict: true as const };
+        return { returnRecord: { id: prior.rows[0].id, returnNumber: prior.rows[0].return_number, total: prior.rows[0].total }, replayed: true as const };
+      }
       const restock = body.restock !== false;
       const returnId = randomUUID();
       const returnNumber = `RET-${randomUUID().slice(0, 8).toUpperCase()}`;
