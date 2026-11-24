@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
+import { createRequestFingerprint } from "../idempotency.js";
 import type { FastifyInstance } from "fastify";
 import { getPool } from "../db.js";
 import { notifyInventoryChanged } from "./inventoryEvents.js";
@@ -40,6 +41,7 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: { code: "VALIDATION_ERROR", message: "Use unique products with whole-number quantities from 1 to 100." } });
     }
 
+    const requestHash = createRequestFingerprint({ customerName: body.customerName.trim(), customerPhone: body.customerPhone.trim(), customerEmail: body.customerEmail?.trim() || null, deliveryAddress: { line1: body.deliveryAddress.line1.trim(), line2: body.deliveryAddress.line2?.trim() || null, city: body.deliveryAddress.city.trim(), state: body.deliveryAddress.state.trim(), pincode: body.deliveryAddress.pincode, country: body.deliveryAddress.country?.trim() || "India" }, items: [...body.items].sort((a, b) => a.productId.localeCompare(b.productId)) });
     const trackingSecret = process.env.ORDER_TRACKING_SECRET;
     if (!trackingSecret || trackingSecret.length < 32) {
       return reply.code(503).send({ error: { code: "CHECKOUT_NOT_CONFIGURED", message: "Online checkout is not configured yet." } });
@@ -64,11 +66,12 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
       }
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [tenantId, key]);
       const prior = await client.query(
-        `SELECT id, order_number AS "orderNumber", status, grand_total::text AS "grandTotal"
+        `SELECT id, order_number AS "orderNumber", status, grand_total::text AS "grandTotal", request_hash AS "requestHash"
          FROM sales_orders WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1`,
         [tenantId, key],
       );
       if (prior.rowCount) {
+        if (prior.rows[0].requestHash !== requestHash) { await client.query("ROLLBACK"); return reply.code(409).send({ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "This Idempotency-Key was already used with a different checkout. Start a new checkout." } }); }
         const trackingToken = createHmac("sha256", trackingSecret).update(`${tenantId}:${key}`).digest("base64url");
         await client.query("COMMIT");
         return reply.code(200).send({ order: prior.rows[0], trackingToken, replayed: true });
@@ -89,9 +92,9 @@ export async function registerOnlineOrderRoutes(app: FastifyInstance) {
       await client.query(
         `INSERT INTO sales_orders
           (id, tenant_id, branch_id, channel, status, payment_status, order_number, customer_name, customer_phone, customer_email, shipping_address,
-           subtotal, tax_total, grand_total, payment_method, idempotency_key, reservation_expires_at, public_tracking_token_hash)
-         VALUES ($1, $2, $3, 'online', 'pending', 'pending', $4, $5, $6, $7, $8::jsonb, 0, 0, 0, 'online', $9, now() + interval '15 minutes', $10)`,
-        [orderId, tenantId, branchId, orderNumber, body.customerName.trim(), body.customerPhone.trim(), body.customerEmail?.trim() || null, JSON.stringify({ ...body.deliveryAddress, country: body.deliveryAddress.country || "India" }), key, trackingHash],
+           subtotal, tax_total, grand_total, payment_method, idempotency_key, reservation_expires_at, public_tracking_token_hash, request_hash)
+         VALUES ($1, $2, $3, 'online', 'pending', 'pending', $4, $5, $6, $7, $8::jsonb, 0, 0, 0, 'online', $9, now() + interval '15 minutes', $10, $11)`,
+        [orderId, tenantId, branchId, orderNumber, body.customerName.trim(), body.customerPhone.trim(), body.customerEmail?.trim() || null, JSON.stringify({ ...body.deliveryAddress, country: body.deliveryAddress.country || "India" }), key, trackingHash, requestHash],
       );
 
       let subtotal = 0n;

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createRequestFingerprint } from "../idempotency.js";
 import type { FastifyInstance } from "fastify";
 import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
@@ -51,6 +52,8 @@ export async function registerSaleRoutes(app: FastifyInstance) {
       }
     }
 
+    const requestHash = createRequestFingerprint({ branchId: body.branchId, customerId: body.customerId || null, customerName: body.customerId ? null : body.customerName?.trim() || null, customerPhone: body.customerId ? null : body.customerPhone?.trim() || null, paymentMethod: body.paymentMethod ?? "cash", items: [...body.items].sort((a, b) => a.productId.localeCompare(b.productId)) });
+
     try {
       const result = await withTenantTransaction(actor.tenantId, async (client) => {
         await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
@@ -62,10 +65,10 @@ export async function registerSaleRoutes(app: FastifyInstance) {
         assertBranchAccess(actor, body.branchId!);
 
         const prior = await client.query(
-          "SELECT id, order_number AS \"orderNumber\", status, grand_total::text AS \"grandTotal\" FROM sales_orders WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1",
+          "SELECT id, order_number AS \"orderNumber\", status, grand_total::text AS \"grandTotal\", request_hash AS \"requestHash\" FROM sales_orders WHERE tenant_id = $1 AND idempotency_key = $2 LIMIT 1",
           [actor.tenantId, key],
         );
-        if (prior.rowCount) return { order: prior.rows[0], replayed: true };
+        if (prior.rowCount) { if (prior.rows[0].requestHash !== requestHash) return { conflict: true as const }; return { order: prior.rows[0], replayed: true as const }; }
 
         let customerName = body.customerName?.trim() || null;
         let customerPhone = body.customerPhone?.trim() || null;
@@ -80,9 +83,9 @@ export async function registerSaleRoutes(app: FastifyInstance) {
         }
         const orderNumber = `POS-${randomUUID().slice(0, 8).toUpperCase()}`;
         const orderId = (await client.query(
-          `INSERT INTO sales_orders (tenant_id, branch_id, channel, status, order_number, customer_id, customer_name, customer_phone, payment_status, payment_method, idempotency_key)
-           VALUES ($1, $2, 'pos', 'confirmed', $3, $4, $5, $6, 'paid', $7, $8) RETURNING id`,
-          [actor.tenantId, body.branchId, orderNumber, body.customerId || null, customerName, customerPhone, body.paymentMethod ?? "cash", key],
+          `INSERT INTO sales_orders (tenant_id, branch_id, channel, status, order_number, customer_id, customer_name, customer_phone, payment_status, payment_method, idempotency_key, request_hash)
+           VALUES ($1, $2, 'pos', 'confirmed', $3, $4, $5, $6, 'paid', $7, $8, $9) RETURNING id`,
+          [actor.tenantId, body.branchId, orderNumber, body.customerId || null, customerName, customerPhone, body.paymentMethod ?? "cash", key, requestHash],
         )).rows[0].id as string;
 
         let subtotal = 0n;
@@ -134,6 +137,7 @@ export async function registerSaleRoutes(app: FastifyInstance) {
         const invoice = await issueSalesInvoice(client, actor.tenantId, orderId);
         return { order: { ...updated.rows[0], invoiceNumber: invoice.invoiceNumber }, replayed: false };
       });
+      if ("conflict" in result && result.conflict) return reply.code(409).send({ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "This Idempotency-Key was already used with a different sale. Use a new key for a new sale." } });
       return reply.code(result.replayed ? 200 : 201).send(result);
     } catch (error) {
       const statusCode = typeof error === "object" && error && "statusCode" in error ? Number(error.statusCode) : 500;

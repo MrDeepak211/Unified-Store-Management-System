@@ -55,6 +55,8 @@ jobs:
         run: pnpm --filter @usms/api test:auth-integration
       - name: Test payment refund safety policy
         run: pnpm --filter @usms/api test:payments
+      - name: Test idempotency request fingerprints
+        run: pnpm --filter @usms/api test:idempotency
       - name: Typecheck
         run: pnpm typecheck
       - name: Build
