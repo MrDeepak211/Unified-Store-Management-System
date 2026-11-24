@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createRequestFingerprint } from "../idempotency.js";
+import { paymentStatusForPosMethod } from "../posPaymentStatus.js";
 import type { FastifyInstance } from "fastify";
 import { assertBranchAccess, requireTenantActor } from "../auth.js";
 import { withTenantTransaction } from "../db.js";
@@ -52,7 +53,9 @@ export async function registerSaleRoutes(app: FastifyInstance) {
       }
     }
 
-    const requestHash = createRequestFingerprint({ branchId: body.branchId, customerId: body.customerId || null, customerName: body.customerId ? null : body.customerName?.trim() || null, customerPhone: body.customerId ? null : body.customerPhone?.trim() || null, paymentMethod: body.paymentMethod ?? "cash", items: [...body.items].sort((a, b) => a.productId.localeCompare(b.productId)) });
+    const paymentMethod = body.paymentMethod ?? "cash";
+    const paymentStatus = paymentStatusForPosMethod(paymentMethod);
+    const requestHash = createRequestFingerprint({ branchId: body.branchId, customerId: body.customerId || null, customerName: body.customerId ? null : body.customerName?.trim() || null, customerPhone: body.customerId ? null : body.customerPhone?.trim() || null, paymentMethod, items: [...body.items].sort((a, b) => a.productId.localeCompare(b.productId)) });
 
     try {
       const result = await withTenantTransaction(actor.tenantId, async (client) => {
@@ -84,8 +87,8 @@ export async function registerSaleRoutes(app: FastifyInstance) {
         const orderNumber = `POS-${randomUUID().slice(0, 8).toUpperCase()}`;
         const orderId = (await client.query(
           `INSERT INTO sales_orders (tenant_id, branch_id, channel, status, order_number, customer_id, customer_name, customer_phone, payment_status, payment_method, idempotency_key, request_hash)
-           VALUES ($1, $2, 'pos', 'confirmed', $3, $4, $5, $6, 'paid', $7, $8, $9) RETURNING id`,
-          [actor.tenantId, body.branchId, orderNumber, body.customerId || null, customerName, customerPhone, body.paymentMethod ?? "cash", key, requestHash],
+           VALUES ($1, $2, 'pos', 'confirmed', $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+          [actor.tenantId, body.branchId, orderNumber, body.customerId || null, customerName, customerPhone, paymentStatus, paymentMethod, key, requestHash],
         )).rows[0].id as string;
 
         let subtotal = 0n;
