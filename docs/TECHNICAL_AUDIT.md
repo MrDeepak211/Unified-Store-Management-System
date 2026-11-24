@@ -52,6 +52,11 @@ Offline sale events now persist their originating tenant ID in IndexedDB. The sy
 
 The POS IndexedDB schema version was advanced to 2 and unit tests cover active-tenant matching, cross-tenant exclusion, failed-event exclusion and legacy unscoped events. The POS package owns this test and its Node test typings so frontend production bundles do not include test-only imports. See [PR #6 — offline queue tenant isolation](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/6).
 
+
+### POS credit-sale settlement correctness
+
+POS sales recorded with payment method `credit` are now created with `payment_status = 'pending'`, rather than incorrectly marked as paid. Cash, UPI, card and bank-transfer selections retain their prior paid status, representing payment confirmation at the counter. This prevents credit invoices from being counted as collected cash in cashbook reporting. The rule is isolated in a pure helper and covered by CI tests. [PR #7 — POS credit receivables](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/7) passed all 18 CI steps, including migrations, stock invariants, API tests, payment/idempotency/offline queue tests, typecheck and build.
+
 ## Remaining release blockers
 
 ### Reproducible dependencies
