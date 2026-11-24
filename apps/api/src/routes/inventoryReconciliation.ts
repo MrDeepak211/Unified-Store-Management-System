@@ -93,12 +93,12 @@ export async function registerInventoryReconciliationRoutes(app: FastifyInstance
     if (typeof key !== "string" || key.length < 8 || key.length > 128) return reply.code(400).send({ error: { code: "IDEMPOTENCY_KEY_REQUIRED", message: "Approval requires an Idempotency-Key header." } });
     const result = await withTenantTransaction(actor.tenantId, async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [actor.tenantId, key]);
-      const session = await client.query("SELECT id, branch_id, status, approved_by FROM inventory_count_sessions WHERE tenant_id=$1 AND id=$2 FOR UPDATE", [actor.tenantId, request.params.sessionId]);
+      const session = await client.query("SELECT id, branch_id, status, approved_by, approval_key FROM inventory_count_sessions WHERE tenant_id=$1 AND id=$2 FOR UPDATE", [actor.tenantId, request.params.sessionId]);
       if (!session.rowCount) throw Object.assign(new Error("Count session not found."), { statusCode: 404 });
       assertBranchAccess(actor, session.rows[0].branch_id);
       const prior = await client.query("SELECT id FROM inventory_movements WHERE tenant_id=$1 AND idempotency_key=$2", [actor.tenantId, key]);
-      if (prior.rowCount && session.rows[0].status === "approved") return { approved: true, replayed: true, movementCount: prior.rowCount };
-      if (session.rows[0].status !== "open") throw Object.assign(new Error("Only open count sessions can be approved."), { statusCode: 409 });
+      if (session.rows[0].status === "approved" && session.rows[0].approval_key === key) return { approved: true, replayed: true, movementCount: prior.rowCount };
+      if (session.rows[0].status !== "open") throw Object.assign(new Error("Only open count sessions can be approved, and the approval key must match for a replay."), { statusCode: 409 });
       const items = await client.query(
         `SELECT i.id, i.product_id, i.expected_quantity, i.counted_quantity, b.on_hand
          FROM inventory_count_items i JOIN inventory_balances b
@@ -129,7 +129,7 @@ export async function registerInventoryReconciliationRoutes(app: FastifyInstance
         );
         await client.query("UPDATE inventory_count_items SET posted_movement_id=$3 WHERE tenant_id=$1 AND id=$2", [actor.tenantId, item.id, inserted.rows[0].id]);
       }
-      await client.query("UPDATE inventory_count_sessions SET status='approved', approved_by=$3, approved_at=now() WHERE tenant_id=$1 AND id=$2", [actor.tenantId, request.params.sessionId, actor.authSubject]);
+      await client.query("UPDATE inventory_count_sessions SET status='approved', approved_by=$3, approved_at=now(), approval_key=$4 WHERE tenant_id=$1 AND id=$2", [actor.tenantId, request.params.sessionId, actor.authSubject, key]);
       if (changed.length) await notifyInventoryChanged(client, { tenantId: actor.tenantId, branchId: session.rows[0].branch_id, productIds: changed.map((item: any) => item.product_id) });
       return { approved: true, replayed: false, movementCount: changed.length };
     });

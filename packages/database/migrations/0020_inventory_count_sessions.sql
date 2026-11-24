@@ -6,10 +6,12 @@ CREATE TABLE inventory_count_sessions (
   status text NOT NULL DEFAULT 'open' CHECK (status IN ('open','approved','cancelled')),
   created_by text NOT NULL,
   approved_by text,
+  approval_key text,
   created_at timestamptz NOT NULL DEFAULT now(),
   approved_at timestamptz,
   FOREIGN KEY (tenant_id, branch_id) REFERENCES branches(tenant_id, id) ON DELETE RESTRICT,
   UNIQUE (tenant_id, id),
+  UNIQUE (tenant_id, approval_key),
   CHECK ((status = 'approved') = (approved_at IS NOT NULL AND approved_by IS NOT NULL))
 );
 CREATE TABLE inventory_count_items (
