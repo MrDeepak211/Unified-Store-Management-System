@@ -15,7 +15,7 @@
     "test:payments": "tsx --test src/routes/refundPolicy.test.ts",
     "test:idempotency": "tsx --test src/idempotency.test.ts",
     "test:pos-payment-status": "tsx --test src/posPaymentStatus.test.ts",
-    "test:receivables": "tsx --test src/receivables.test.ts"
+    "test:receivables": "tsx --test src/receivableMath.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
