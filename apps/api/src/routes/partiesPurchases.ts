@@ -356,6 +356,37 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
     }
   );
 
+  app.get<{ Params: { supplierId: string } }>("/api/v1/business/suppliers/:supplierId/receipt-balances", async (request) => {
+    const actor = await requireTenantActor(request);
+    return withTenantTransaction(actor.tenantId, async (client) => {
+      const supplier = await client.query("SELECT id, name FROM suppliers WHERE tenant_id=$1 AND id=$2", [actor.tenantId, request.params.supplierId]);
+      if (!supplier.rowCount) throw Object.assign(new Error("Supplier not found."), { statusCode: 404 });
+      const receipts = await client.query(
+        `SELECT r.id, r.receipt_number AS "receiptNumber", r.branch_id AS "branchId",
+                r.created_at AS "createdAt", r.grand_total::text AS "grandTotal",
+                COALESCE(a.payment_amount,0)::text AS "allocatedPayments",
+                COALESCE(a.credit_amount,0)::text AS "allocatedCredits",
+                COALESCE(a.total_amount,0)::text AS "allocatedTotal"
+         FROM purchase_receipts r LEFT JOIN (
+           SELECT tenant_id, receipt_id,
+                  SUM(amount) FILTER (WHERE source_type='payment') AS payment_amount,
+                  SUM(amount) FILTER (WHERE source_type='credit_note') AS credit_amount,
+                  SUM(amount) AS total_amount
+           FROM supplier_payment_allocations
+           WHERE tenant_id=$1 AND ($3::uuid[] IS NULL OR branch_id=ANY($3))
+           GROUP BY tenant_id, receipt_id
+         ) a ON a.tenant_id=r.tenant_id AND a.receipt_id=r.id
+         WHERE r.tenant_id=$1 AND r.supplier_id=$2 AND r.status='received'
+           AND ($3::uuid[] IS NULL OR r.branch_id=ANY($3))
+         ORDER BY r.created_at DESC, r.id`,
+        [actor.tenantId, request.params.supplierId, actor.branchIds.length ? actor.branchIds : null],
+      );
+      const balances = receipts.rows.map((row: { id:string; grandTotal:string; allocatedPayments:string; allocatedCredits:string; allocatedTotal:string }) => ({
+        ...row, outstanding: formatMoney(toCents(row.grandTotal) - toCents(row.allocatedTotal)),
+      }));
+      return { supplier: supplier.rows[0], receipts: balances };
+    });
+  });
   app.get<{ Params: { supplierId: string } }>("/api/v1/business/suppliers/:supplierId/statement", async (request) => {
     const actor = await requireTenantActor(request);
     return withTenantTransaction(actor.tenantId, async (client) => {
@@ -394,9 +425,32 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
         else if (row.type === "purchase_return") returned += toCents(row.credit);
         else paid += toCents(row.credit);
       }
+      const allocationTotals = await client.query(
+        `SELECT COALESCE(SUM(amount) FILTER (WHERE source_type='payment'),0)::text AS payment_amount,
+                       COALESCE(SUM(amount) FILTER (WHERE source_type='credit_note'),0)::text AS credit_amount
+         FROM supplier_payment_allocations WHERE tenant_id=$1 AND supplier_id=$2
+           AND ($3::uuid[] IS NULL OR branch_id=ANY($3))`,
+        [actor.tenantId, request.params.supplierId, actor.branchIds.length ? actor.branchIds : null],
+      );
+      const sourceTotals = await client.query(
+        `SELECT
+           COALESCE((SELECT SUM(amount) FROM supplier_payments WHERE tenant_id=$1 AND supplier_id=$2 AND ($3::uuid[] IS NULL OR branch_id=ANY($3))),0)::text AS payments,
+           COALESCE((SELECT SUM(credit_total) FROM supplier_purchase_returns WHERE tenant_id=$1 AND supplier_id=$2 AND status='posted' AND ($3::uuid[] IS NULL OR branch_id=ANY($3))),0)::text AS credits`,
+        [actor.tenantId, request.params.supplierId, actor.branchIds.length ? actor.branchIds : null],
+      );
+      const allocatedPayments = toCents(allocationTotals.rows[0].payment_amount);
+      const allocatedCredits = toCents(allocationTotals.rows[0].credit_amount);
+      const sourcePayments = toCents(sourceTotals.rows[0].payments);
+      const sourceCredits = toCents(sourceTotals.rows[0].credits);
       return {
         supplier: supplier.rows[0],
-        summary: { totalPurchased: formatMoney(purchased), totalReturned: formatMoney(returned), totalPaid: formatMoney(paid), outstanding: formatMoney(purchased - returned - paid) },
+        summary: {
+          totalPurchased: formatMoney(purchased), totalReturned: formatMoney(returned), totalPaid: formatMoney(paid),
+          outstanding: formatMoney(purchased - returned - paid),
+          allocatedPayments: formatMoney(allocatedPayments), allocatedCredits: formatMoney(allocatedCredits),
+          unallocatedPayments: formatMoney(sourcePayments - allocatedPayments),
+          unallocatedCredits: formatMoney(sourceCredits - allocatedCredits),
+        },
         entries: rows.rows,
       };
     });

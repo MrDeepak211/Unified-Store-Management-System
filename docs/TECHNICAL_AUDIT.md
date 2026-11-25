@@ -133,3 +133,9 @@ Posted supplier credit notes appear as credits in the supplier statement and red
 PostgreSQL-backed CI verified the new migration, purchase return integration, idempotent replay, over-return rejection, stock/reserved quantity preservation, supplier statement totals, TypeScript typecheck and monorepo build. See [PR #21](https://github.com/MrDeepak211/Unified-Store-Management-System/pull/21).
 
 Remaining accounting scope: allocation of supplier payments and credit notes to individual receipts, supplier credit-note reversal/void workflow, supplier statement export/print, and tax-professional review. This is not accounting or tax certification. Hosted staging integration and production deployment remain deferred.
+
+### Supplier receipt allocation visibility — 2026-11-25
+
+Supplier accounting read APIs expose receipt-level allocation summaries and supplier-level unapplied balances. Receipt balances separate allocated payments from allocated credit notes and report remaining receipt amounts. Supplier statements retain the supplier-level liability calculation while also reporting allocated and unapplied payment/credit totals. Allocation values are assignment detail; they do not create additional payments or credit notes.
+
+Integration assertions cover receipt allocation totals, receipt outstanding, and unallocated source amounts. CI verification is required before merge. No hosted staging or production activity is included.
