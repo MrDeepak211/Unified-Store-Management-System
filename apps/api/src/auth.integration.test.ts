@@ -477,8 +477,8 @@ test("supplier payments reconcile partial balances, reject overpayment and repla
     method: "GET", url: `/api/v1/business/suppliers/${supplierId}/statement.csv`, headers: ownerHeaders,
   });
   assert.equal(statementCsv.statusCode, 200, statementCsv.body);
-  assert.match(statementCsv.headers["content-type"] ?? "", /text\\/csv/);
-  assert.match(statementCsv.headers["content-disposition"] ?? "", /attachment; filename=supplier-statement\\.csv/);
+  assert.match(statementCsv.headers["content-type"] ?? "", /text\/csv/);
+  assert.match(statementCsv.headers["content-disposition"] ?? "", /attachment; filename=supplier-statement\.csv/);
   assert.match(statementCsv.body, /Running balance/);
   assert.match(statementCsv.body, /purchase_return/);
 
