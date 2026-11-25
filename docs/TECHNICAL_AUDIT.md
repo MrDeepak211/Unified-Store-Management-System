@@ -139,3 +139,7 @@ Remaining accounting scope: allocation of supplier payments and credit notes to 
 Supplier accounting read APIs expose receipt-level allocation summaries and supplier-level unapplied balances. Receipt balances separate allocated payments from allocated credit notes and report remaining receipt amounts. Supplier statements retain the supplier-level liability calculation while also reporting allocated and unapplied payment/credit totals. Allocation values are assignment detail; they do not create additional payments or credit notes.
 
 Integration assertions cover receipt allocation totals, receipt outstanding, and unallocated source amounts. CI verification is required before merge. No hosted staging or production activity is included.
+
+### Supplier allocation history — 2026-11-25
+
+Added a tenant- and branch-scoped allocation history read endpoint. Each record identifies the source type and source ID, source reference, payment method when applicable, receipt reference, allocation batch, amount, and timestamp. It is an audit/read surface only and does not mutate balances. Automated integration coverage checks that a supplier's payment and credit-note allocations are both returned.
