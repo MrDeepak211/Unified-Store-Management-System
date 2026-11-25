@@ -485,6 +485,12 @@ test("supplier payments reconcile partial balances, reject overpayment and repla
   assert.equal(statement.json().summary.allocatedCredits, "10.00");
   assert.equal(statement.json().summary.unallocatedPayments, "15.00");
   assert.equal(statement.json().summary.unallocatedCredits, "10.00");
+  const allocationHistory = await app.inject({
+    method: "GET", url: `/api/v1/business/suppliers/${supplierId}/allocation-history`, headers: ownerHeaders,
+  });
+  assert.equal(allocationHistory.statusCode, 200, allocationHistory.body);
+  assert.equal(allocationHistory.json().allocations.length, 2);
+  assert.deepEqual(new Set(allocationHistory.json().allocations.map((row: { source_type: string }) => row.source_type)), new Set(["payment", "credit_note"]));
   const supplierList = await app.inject({ method: "GET", url: "/api/v1/business/suppliers", headers: ownerHeaders });
   const supplier = supplierList.json().suppliers.find((row: { id: string }) => row.id === supplierId);
   assert.equal(supplier.outstanding, "40.00");

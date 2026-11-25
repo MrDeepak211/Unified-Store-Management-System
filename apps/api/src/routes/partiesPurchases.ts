@@ -387,6 +387,18 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
       return { supplier: supplier.rows[0], receipts: balances };
     });
   });
+  app.get<{ Params: { supplierId: string } }>("/api/v1/business/suppliers/:supplierId/allocation-history", async (request) => {
+    const actor = await requireTenantActor(request);
+    return withTenantTransaction(actor.tenantId, async (client) => {
+      const supplier = await client.query("SELECT id, name FROM suppliers WHERE tenant_id=$1 AND id=$2", [actor.tenantId, request.params.supplierId]);
+      if (!supplier.rowCount) throw Object.assign(new Error("Supplier not found."), { statusCode: 404 });
+      const history = await client.query(
+        "SELECT a.id, a.source_type, a.source_id, a.receipt_id, a.amount::text, a.allocation_batch_id, a.created_at, r.receipt_number, CASE WHEN a.source_type='payment' THEN COALESCE(p.reference,p.id::text) ELSE cr.return_number END AS source_reference, p.payment_method FROM supplier_payment_allocations a JOIN purchase_receipts r ON r.tenant_id=a.tenant_id AND r.id=a.receipt_id LEFT JOIN supplier_payments p ON a.source_type='payment' AND p.tenant_id=a.tenant_id AND p.id=a.source_id LEFT JOIN supplier_purchase_returns cr ON a.source_type='credit_note' AND cr.tenant_id=a.tenant_id AND cr.id=a.source_id WHERE a.tenant_id=$1 AND a.supplier_id=$2 AND ($3::uuid[] IS NULL OR a.branch_id=ANY($3)) ORDER BY a.created_at DESC, a.id",
+        [actor.tenantId, request.params.supplierId, actor.branchIds.length ? actor.branchIds : null],
+      );
+      return { supplier: supplier.rows[0], allocations: history.rows };
+    });
+  });
   app.get<{ Params: { supplierId: string } }>("/api/v1/business/suppliers/:supplierId/statement", async (request) => {
     const actor = await requireTenantActor(request);
     return withTenantTransaction(actor.tenantId, async (client) => {
