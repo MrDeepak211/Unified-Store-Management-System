@@ -143,3 +143,7 @@ Integration assertions cover receipt allocation totals, receipt outstanding, and
 ### Supplier allocation history — 2026-11-25
 
 Added a tenant- and branch-scoped allocation history read endpoint. Each record identifies the source type and source ID, source reference, payment method when applicable, receipt reference, allocation batch, amount, and timestamp. It is an audit/read surface only and does not mutate balances. Automated integration coverage checks that a supplier's payment and credit-note allocations are both returned.
+
+### Supplier statement CSV export — 2026-11-25
+
+Added an authenticated, tenant- and branch-scoped CSV export for supplier statements. The export contains supplier identity, generation timestamp, ledger date/type/reference, debit, credit, and running balance. CSV cells are quoted and formula-leading values are prefixed to mitigate spreadsheet formula injection. It is an export-only endpoint; it does not alter accounting records.

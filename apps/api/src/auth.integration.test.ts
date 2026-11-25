@@ -473,6 +473,15 @@ test("supplier payments reconcile partial balances, reject overpayment and repla
   assert.equal(statement.json().summary.totalPaid, "40.00");
   assert.equal(statement.json().summary.outstanding, "40.00");
   assert.equal(statement.json().entries.length, 3);
+  const statementCsv = await app.inject({
+    method: "GET", url: `/api/v1/business/suppliers/${supplierId}/statement.csv`, headers: ownerHeaders,
+  });
+  assert.equal(statementCsv.statusCode, 200, statementCsv.body);
+  assert.match(statementCsv.headers["content-type"] ?? "", /text\/csv/);
+  assert.match(statementCsv.headers["content-disposition"] ?? "", /attachment; filename=supplier-statement\.csv/);
+  assert.match(statementCsv.body, /Running balance/);
+  assert.match(statementCsv.body, /purchase_return/);
+
 
   const receiptBalances = await app.inject({
     method: "GET", url: `/api/v1/business/suppliers/${supplierId}/receipt-balances`, headers: ownerHeaders,
