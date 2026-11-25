@@ -399,6 +399,26 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
       return { supplier: supplier.rows[0], allocations: history.rows };
     });
   });
+  app.get<{ Params: { supplierId: string } }>("/api/v1/business/suppliers/:supplierId/statement.csv", async (request, reply) => {
+    const actor = await requireTenantActor(request);
+    const csvCell = (value: unknown) => {
+      let text = value == null ? "" : String(value);
+      if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
+      return '"' + text.replace(/"/g, '""') + '"';
+    };
+    return withTenantTransaction(actor.tenantId, async (client) => {
+      const supplier = await client.query("SELECT name FROM suppliers WHERE tenant_id=$1 AND id=$2", [actor.tenantId, request.params.supplierId]);
+      if (!supplier.rowCount) throw Object.assign(new Error("Supplier not found."), { statusCode: 404 });
+      const rows = await client.query(
+        "WITH ledger AS ( SELECT r.id, r.receipt_number AS reference, r.created_at, 'purchase'::text AS type, r.grand_total::numeric AS debit, 0::numeric AS credit FROM purchase_receipts r WHERE r.tenant_id=$1 AND r.supplier_id=$2 AND r.status='received' AND ($3::uuid[] IS NULL OR r.branch_id=ANY($3)) UNION ALL SELECT p.id, COALESCE(p.reference,p.id::text), p.created_at, 'payment'::text, 0::numeric, p.amount FROM supplier_payments p WHERE p.tenant_id=$1 AND p.supplier_id=$2 AND ($3::uuid[] IS NULL OR p.branch_id=ANY($3)) UNION ALL SELECT cr.id, cr.return_number, cr.created_at, 'purchase_return'::text, 0::numeric, cr.credit_total FROM supplier_purchase_returns cr WHERE cr.tenant_id=$1 AND cr.supplier_id=$2 AND cr.status='posted' AND ($3::uuid[] IS NULL OR cr.branch_id=ANY($3)) ) SELECT reference, created_at, type, debit::text, credit::text, SUM(debit-credit) OVER (ORDER BY created_at,id ROWS UNBOUNDED PRECEDING)::text AS balance FROM ledger ORDER BY created_at,id",
+        [actor.tenantId, request.params.supplierId, actor.branchIds.length ? actor.branchIds : null],
+      );
+      const lines = [["Supplier", supplier.rows[0].name], ["Generated", new Date().toISOString()], [], ["Date", "Entry type", "Reference", "Debit", "Credit", "Running balance"],
+        ...rows.rows.map((row: { reference:string; created_at:Date|string; type:string; debit:string; credit:string; balance:string }) => [new Date(row.created_at).toISOString(), row.type, row.reference, row.debit, row.credit, row.balance]),
+      ].map((row) => row.map(csvCell).join(",")).join("\r\n");
+      return reply.header("content-type", "text/csv; charset=utf-8").header("content-disposition", "attachment; filename=supplier-statement.csv").send("\uFEFF" + lines + "\r\n");
+    });
+  });
   app.get<{ Params: { supplierId: string } }>("/api/v1/business/suppliers/:supplierId/statement", async (request) => {
     const actor = await requireTenantActor(request);
     return withTenantTransaction(actor.tenantId, async (client) => {
