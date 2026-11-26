@@ -419,6 +419,37 @@ export async function registerPartyAndPurchaseRoutes(app: FastifyInstance) {
       return reply.header("content-type", "text/csv; charset=utf-8").header("content-disposition", "attachment; filename=supplier-statement.csv").send("\uFEFF" + lines + "\r\n");
     });
   });
+  app.get<{ Params: { supplierId: string } }>("/api/v1/business/suppliers/:supplierId/statement.print", async (request, reply) => {
+    const actor = await requireTenantActor(request);
+    const html = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[character]!));
+    return withTenantTransaction(actor.tenantId, async (client) => {
+      const supplier = await client.query("SELECT id, name FROM suppliers WHERE tenant_id=$1 AND id=$2", [actor.tenantId, request.params.supplierId]);
+      if (!supplier.rowCount) throw Object.assign(new Error("Supplier not found."), { statusCode: 404 });
+      const scope = actor.branchIds.length ? actor.branchIds : null;
+      const ledger = await client.query(
+        "WITH ledger AS ( SELECT r.id, r.receipt_number AS reference, r.created_at, 'Purchase'::text AS type, r.grand_total::numeric AS debit, 0::numeric AS credit FROM purchase_receipts r WHERE r.tenant_id=$1 AND r.supplier_id=$2 AND r.status='received' AND ($3::uuid[] IS NULL OR r.branch_id=ANY($3)) UNION ALL SELECT p.id, COALESCE(p.reference,p.id::text), p.created_at, 'Payment'::text, 0::numeric, p.amount FROM supplier_payments p WHERE p.tenant_id=$1 AND p.supplier_id=$2 AND ($3::uuid[] IS NULL OR p.branch_id=ANY($3)) UNION ALL SELECT cr.id, cr.return_number, cr.created_at, 'Purchase return'::text, 0::numeric, cr.credit_total FROM supplier_purchase_returns cr WHERE cr.tenant_id=$1 AND cr.supplier_id=$2 AND cr.status='posted' AND ($3::uuid[] IS NULL OR cr.branch_id=ANY($3)) ) SELECT id, reference, created_at, type, debit::text, credit::text, SUM(debit-credit) OVER (ORDER BY created_at,id ROWS UNBOUNDED PRECEDING)::text AS balance FROM ledger ORDER BY created_at,id",
+        [actor.tenantId, request.params.supplierId, scope],
+      );
+      const allocations = await client.query(
+        "SELECT a.source_type, a.amount::text, a.created_at, r.receipt_number, CASE WHEN a.source_type='payment' THEN COALESCE(p.reference,p.id::text) ELSE cr.return_number END AS source_reference FROM supplier_payment_allocations a JOIN purchase_receipts r ON r.tenant_id=a.tenant_id AND r.id=a.receipt_id LEFT JOIN supplier_payments p ON a.source_type='payment' AND p.tenant_id=a.tenant_id AND p.id=a.source_id LEFT JOIN supplier_purchase_returns cr ON a.source_type='credit_note' AND cr.tenant_id=a.tenant_id AND cr.id=a.source_id WHERE a.tenant_id=$1 AND a.supplier_id=$2 AND ($3::uuid[] IS NULL OR a.branch_id=ANY($3)) ORDER BY a.created_at,a.id",
+        [actor.tenantId, request.params.supplierId, scope],
+      );
+      const money = (value: string) => Number(value).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const table = (headers: string[], rows: string[][]) => "<table><thead><tr>" + headers.map((h) => "<th>" + html(h) + "</th>").join("") + "</tr></thead><tbody>" + (rows.length ? rows.map((row) => "<tr>" + row.map((cell) => "<td>" + html(cell) + "</td>").join("") + "</tr>").join("") : "<tr><td colspan=\"" + headers.length + "\">No records</td></tr>") + "</tbody></table>";
+      const entries = ledger.rows.map((row: { created_at:Date|string; type:string; reference:string; debit:string; credit:string; balance:string }) => [new Date(row.created_at).toLocaleString("en-IN"), row.type, row.reference, money(row.debit), money(row.credit), money(row.balance)]);
+      const allocationRows = allocations.rows.map((row: { created_at:Date|string; source_type:string; source_reference:string; receipt_number:string; amount:string }) => [new Date(row.created_at).toLocaleString("en-IN"), row.source_type === "payment" ? "Payment" : "Credit note", row.source_reference ?? "", row.receipt_number, money(row.amount)]);
+      let purchased=0n, paid=0n, returned=0n;
+      for (const row of ledger.rows as Array<{type:string;debit:string;credit:string}>) {
+        if (row.type === "Purchase") purchased += toCents(row.debit);
+        else if (row.type === "Purchase return") returned += toCents(row.credit);
+        else paid += toCents(row.credit);
+      }
+      const body = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Supplier statement - " + html(supplier.rows[0].name) + "</title><style>body{font:14px/1.45 Arial,sans-serif;color:#17221d;margin:28px}h1{margin:0 0 4px}h2{margin-top:28px;font-size:17px}.muted{color:#58665e}.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}.summary div{border:1px solid #ccd5ce;padding:12px;border-radius:8px}.summary b{display:block;font-size:18px;margin-top:5px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #d5ddd7;padding:7px;text-align:left}th{background:#eef3ef}td:nth-last-child(-n+3){text-align:right}.actions{margin:18px 0}.actions button{padding:8px 14px}@media print{body{margin:0}.actions{display:none}.summary div{break-inside:avoid}h2{break-after:avoid}table{break-inside:auto}tr{break-inside:avoid;break-after:auto}thead{display:table-header-group}}</style></head><body><div class=\"actions\"><button type=\"button\" onclick=\"window.print()\">Print / Save as PDF</button></div><h1>Supplier Statement</h1><div><b>" + html(supplier.rows[0].name) + "</b></div><div class=\"muted\">Generated " + html(new Date().toLocaleString("en-IN")) + " · Amounts in account currency</div><section class=\"summary\"><div>Total purchased<b>" + money(formatMoney(purchased)) + "</b></div><div>Returns / credits<b>" + money(formatMoney(returned)) + "</b></div><div>Payments<b>" + money(formatMoney(paid)) + "</b></div></section><h2>Supplier ledger</h2>" + table(["Date","Entry","Reference","Debit","Credit","Balance"], entries) + "<h2>Receipt allocation reconciliation</h2><p class=\"muted\">Allocation records assign existing payments or credit notes to receipts. They are not additional financial transactions.</p>" + table(["Date","Source","Source reference","Receipt","Allocated amount"], allocationRows) + "</body></html>";
+      return reply.header("content-type", "text/html; charset=utf-8").header("content-disposition", "inline; filename=supplier-statement.html").send(body);
+    });
+  });
   app.get<{ Params: { supplierId: string } }>("/api/v1/business/suppliers/:supplierId/statement", async (request) => {
     const actor = await requireTenantActor(request);
     return withTenantTransaction(actor.tenantId, async (client) => {
