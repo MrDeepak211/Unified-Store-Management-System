@@ -147,3 +147,7 @@ Added a tenant- and branch-scoped allocation history read endpoint. Each record 
 ### Supplier statement CSV export — 2026-11-25
 
 Added an authenticated, tenant- and branch-scoped CSV export for supplier statements. The export contains supplier identity, generation timestamp, ledger date/type/reference, debit, credit, and running balance. CSV cells are quoted and formula-leading values are prefixed to mitigate spreadsheet formula injection. It is an export-only endpoint; it does not alter accounting records.
+
+### Supplier statement print view — 2026-11-26
+
+Added an authenticated, tenant- and branch-scoped HTML supplier statement view suitable for browser printing or Save as PDF. It displays the supplier ledger, debit/credit/running balances, and a separate receipt allocation reconciliation section. All dynamic text is HTML-escaped. The view is read-only and clarifies that allocations are assignments of existing payments/credits rather than new financial entries.
